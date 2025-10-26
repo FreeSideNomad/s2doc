@@ -1,0 +1,504 @@
+# domain-stories-schema.yaml
+# JSON Schema (YAML form) for validating Domain Storytelling artifacts
+# Version: 2.0.0
+# Notes:
+# - Enforces ID formats via regex and structure via $defs and $ref.
+# - Standard JSON Schema cannot *guarantee* that a referenced ID actually exists
+#   elsewhere in the same document (true referential integrity). This schema
+#   enforces structure and ID patterns; a secondary validator can check existence.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://example.org/schemas/domain-stories-schema-v2.yaml"
+
+title: Domain Stories Schema
+version: "2.0.0"
+type: object
+additionalProperties: false
+
+properties:
+  version:
+    type: string
+    description: "Schema or model version, e.g., 0.1.0"
+  domain_stories:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/DomainStory"
+
+required: [domain_stories]
+
+$defs:
+
+  # -----------------------------
+  # ID types (lower_snake_case)
+  # -----------------------------
+  DstId:
+    type: string
+    pattern: "^dst_[a-z0-9_]+$"
+    description: "Domain Story ID"
+
+  ActId:
+    type: string
+    pattern: "^act_[a-z0-9_]+$"
+    description: "Actor ID"
+
+  CmdId:
+    type: string
+    pattern: "^cmd_[a-z0-9_]+$"
+    description: "Command ID"
+
+  QryId:
+    type: string
+    pattern: "^qry_[a-z0-9_]+$"
+    description: "Query ID"
+
+  EvtId:
+    type: string
+    pattern: "^evt_[a-z0-9_]+$"
+    description: "Event ID"
+
+  PolId:
+    type: string
+    pattern: "^pol_[a-z0-9_]+$"
+    description: "Policy ID"
+
+  AggId:
+    type: string
+    pattern: "^agg_[a-z0-9_]+$"
+    description: "Aggregate ID"
+
+  RepoId:
+    type: string
+    pattern: "^repo_[a-z0-9_]+$"
+    description: "Repository identifier"
+
+  SvcAppId:
+    type: string
+    pattern: "^svc_app_[a-z0-9_]+$"
+    description: "Application Service identifier"
+
+  SvcDomId:
+    type: string
+    pattern: "^svc_dom_[a-z0-9_]+$"
+    description: "Domain Service identifier"
+
+  WobjId:
+    type: string
+    pattern: "^wobj_[a-z0-9_]+$"
+    description: "Work Object ID"
+
+  ActvId:
+    type: string
+    pattern: "^actv_[a-z0-9_]+$"
+    description: "Activity ID"
+
+  RmdlId:
+    type: string
+    pattern: "^rmdl_[a-z0-9_]+$"
+    description: "Read Model ID"
+
+  RuleId:
+    type: string
+    pattern: "^rle_[a-z0-9_]+$"
+    description: "Business Rule ID"
+
+  # -----------------------------
+  # Reusable components
+  # -----------------------------
+  Attribute:
+    type: object
+    additionalProperties: false
+    required: [name, type]
+    properties:
+      name:
+        type: string
+        pattern: "^[a-z][a-z0-9_]*$"
+      type:
+        type: string
+        description: "Primitive or reference type"
+        enum: [string, integer, number, boolean, date, datetime, uuid, money, enum, json, ref]
+      ref_id:
+        type: string
+        description: "If type=ref, reference to WobjId/AggId/etc. (pattern not enforced by enum here)"
+      required:
+        type: boolean
+        default: false
+      description:
+        type: string
+
+  Parameter:
+    type: object
+    additionalProperties: false
+    required: [name, type]
+    properties:
+      name:
+        type: string
+        pattern: "^[a-z][a-z0-9_]*$"
+      type:
+        type: string
+        enum: [string, integer, number, boolean, date, datetime, uuid, money, enum, json, ref]
+      ref_id:
+        type: string
+        description: "If type=ref, reference to another ID"
+      required:
+        type: boolean
+        default: true
+      default:
+        description: "Default literal value (if applicable)"
+      description:
+        type: string
+
+  Operation:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name:
+        type: string
+        pattern: "^[a-z][a-z0-9_]*$"
+      parameters:
+        type: array
+        items: { $ref: "#/$defs/Parameter" }
+        default: []
+      return_type:
+        type: string
+        enum: [void, string, integer, number, boolean, date, datetime, uuid, money, enum, json, ref]
+      return_ref_id:
+        type: string
+        description: "If return_type=ref, reference to WobjId/RmdlId/etc."
+      description:
+        type: string
+
+  # -----------------------------
+  # Core concepts
+  # -----------------------------
+  Actor:
+    type: object
+    additionalProperties: false
+    required: [actor_id, name, kind]
+    properties:
+      actor_id: { $ref: "#/$defs/ActId" }
+      name:
+        type: string
+      kind:
+        type: string
+        enum: [person, system, role]
+      description:
+        type: string
+      tags:
+        type: array
+        items: { type: string }
+
+  WorkObject:
+    type: object
+    additionalProperties: false
+    required: [work_object_id, name]
+    properties:
+      work_object_id: { $ref: "#/$defs/WobjId" }
+      name: { type: string }
+      description: { type: string }
+      attributes:
+        type: array
+        items: { $ref: "#/$defs/Attribute" }
+        default: []
+      aggregate_id:
+        $ref: "#/$defs/AggId"
+
+  Aggregate:
+    type: object
+    additionalProperties: false
+    required: [aggregate_id, name, root_work_object_id]
+    properties:
+      aggregate_id: { $ref: "#/$defs/AggId" }
+      name: { type: string }
+      description: { type: string }
+      root_work_object_id: { $ref: "#/$defs/WobjId" }
+      work_object_ids:
+        type: array
+        items: { $ref: "#/$defs/WobjId" }
+        default: []
+      invariants:
+        type: array
+        items: { type: string }
+        default: []
+
+  Repository:
+    type: object
+    additionalProperties: false
+    required: [repository_id, aggregate_id, name]
+    properties:
+      repository_id: { $ref: "#/$defs/RepoId" }
+      name: { type: string }
+      aggregate_id: { $ref: "#/$defs/AggId" }
+      operations:
+        type: array
+        items: { $ref: "#/$defs/Operation" }
+        default: []
+
+  ApplicationService:
+    type: object
+    additionalProperties: false
+    required: [app_service_id, name]
+    properties:
+      app_service_id: { $ref: "#/$defs/SvcAppId" }
+      name: { type: string }
+      description: { type: string }
+      commands_handled:
+        type: array
+        items: { $ref: "#/$defs/CmdId" }
+        default: []
+      queries_handled:
+        type: array
+        items: { $ref: "#/$defs/QryId" }
+        default: []
+      operations:
+        type: array
+        items: { $ref: "#/$defs/Operation" }
+        default: []
+
+  DomainService:
+    type: object
+    additionalProperties: false
+    required: [domain_service_id, name]
+    properties:
+      domain_service_id: { $ref: "#/$defs/SvcDomId" }
+      name: { type: string }
+      description: { type: string }
+      operates_on:
+        type: array
+        items:
+          anyOf:
+            - $ref: "#/$defs/AggId"
+            - $ref: "#/$defs/WobjId"
+        default: []
+      operations:
+        type: array
+        items: { $ref: "#/$defs/Operation" }
+        default: []
+
+  Command:
+    type: object
+    additionalProperties: false
+    required: [command_id, name, actor_ids]
+    properties:
+      command_id: { $ref: "#/$defs/CmdId" }
+      name: { type: string }
+      description: { type: string }
+      actor_ids:
+        type: array
+        minItems: 1
+        items: { $ref: "#/$defs/ActId" }
+      target_aggregate_id:
+        $ref: "#/$defs/AggId"
+      parameters:
+        type: array
+        items: { $ref: "#/$defs/Parameter" }
+        default: []
+      preconditions:
+        type: array
+        items: { type: string }
+        default: []
+      invokes_app_services:
+        type: array
+        items: { $ref: "#/$defs/SvcAppId" }
+        default: []
+      invokes_domain_services:
+        type: array
+        items: { $ref: "#/$defs/SvcDomId" }
+        default: []
+      emits_events:
+        type: array
+        items: { $ref: "#/$defs/EvtId" }
+        default: []
+
+  Query:
+    type: object
+    additionalProperties: false
+    required: [query_id, name, actor_ids]
+    properties:
+      query_id: { $ref: "#/$defs/QryId" }
+      name: { type: string }
+      description: { type: string }
+      actor_ids:
+        type: array
+        minItems: 1
+        items: { $ref: "#/$defs/ActId" }
+      parameters:
+        type: array
+        items: { $ref: "#/$defs/Parameter" }
+        default: []
+      returns_read_model_id:
+        $ref: "#/$defs/RmdlId"
+
+  ReadModel:
+    type: object
+    additionalProperties: false
+    required: [read_model_id, name]
+    properties:
+      read_model_id: { $ref: "#/$defs/RmdlId" }
+      name: { type: string }
+      description: { type: string }
+      attributes:
+        type: array
+        items: { $ref: "#/$defs/Attribute" }
+        default: []
+
+  Activity:
+    type: object
+    additionalProperties: false
+    required: [activity_id, name]
+    properties:
+      activity_id: { $ref: "#/$defs/ActvId" }
+      name: { type: string }
+      description: { type: string }
+      initiated_by_command_id:
+        $ref: "#/$defs/CmdId"
+      uses_work_object_ids:
+        type: array
+        items: { $ref: "#/$defs/WobjId" }
+        default: []
+      results_in_event_ids:
+        type: array
+        items: { $ref: "#/$defs/EvtId" }
+        default: []
+      calls_app_service_ids:
+        type: array
+        items: { $ref: "#/$defs/SvcAppId" }
+        default: []
+      calls_domain_service_ids:
+        type: array
+        items: { $ref: "#/$defs/SvcDomId" }
+        default: []
+
+  Event:
+    type: object
+    additionalProperties: false
+    required: [event_id, name]
+    properties:
+      event_id: { $ref: "#/$defs/EvtId" }
+      name: { type: string }
+      description: { type: string }
+      tense:
+        type: string
+        enum: [past]
+        default: past
+      payload:
+        type: array
+        items: { $ref: "#/$defs/Attribute" }
+        default: []
+      caused_by:
+        description: "Either a command or an activity"
+        oneOf:
+          - type: object
+            additionalProperties: false
+            required: [command_id]
+            properties:
+              command_id: { $ref: "#/$defs/CmdId" }
+          - type: object
+            additionalProperties: false
+            required: [activity_id]
+            properties:
+              activity_id: { $ref: "#/$defs/ActvId" }
+      affected_aggregate_id:
+        $ref: "#/$defs/AggId"
+      policies_triggered:
+        type: array
+        items: { $ref: "#/$defs/PolId" }
+        default: []
+
+  Policy:
+    type: object
+    additionalProperties: false
+    required: [policy_id, name, when_event_id, issues_command_id]
+    properties:
+      policy_id: { $ref: "#/$defs/PolId" }
+      name: { type: string }
+      description: { type: string }
+      when_event_id: { $ref: "#/$defs/EvtId" }
+      issues_command_id: { $ref: "#/$defs/CmdId" }
+
+  BusinessRule:
+    type: object
+    additionalProperties: false
+    required: [rule_id, text]
+    properties:
+      rule_id: { $ref: "#/$defs/RuleId" }
+      text: { type: string }
+      applies_to:
+        type: array
+        description: "IDs the rule applies to (aggregates, work objects, commands, etc.)"
+        items:
+          anyOf:
+            - $ref: "#/$defs/AggId"
+            - $ref: "#/$defs/WobjId"
+            - $ref: "#/$defs/CmdId"
+            - $ref: "#/$defs/QryId"
+            - $ref: "#/$defs/EvtId"
+            - $ref: "#/$defs/PolId"
+
+  # -----------------------------
+  # Domain Story aggregate object
+  # -----------------------------
+  DomainStory:
+    type: object
+    additionalProperties: false
+    required: [domain_story_id, title, actors]
+    properties:
+      domain_story_id: { $ref: "#/$defs/DstId" }
+      title: { type: string }
+      description: { type: string }
+      tags:
+        type: array
+        items: { type: string }
+      actors:
+        type: array
+        minItems: 1
+        items: { $ref: "#/$defs/Actor" }
+      work_objects:
+        type: array
+        items: { $ref: "#/$defs/WorkObject" }
+        default: []
+      aggregates:
+        type: array
+        items: { $ref: "#/$defs/Aggregate" }
+        default: []
+      repositories:
+        type: array
+        items: { $ref: "#/$defs/Repository" }
+        default: []
+      application_services:
+        type: array
+        items: { $ref: "#/$defs/ApplicationService" }
+        default: []
+      domain_services:
+        type: array
+        items: { $ref: "#/$defs/DomainService" }
+        default: []
+      commands:
+        type: array
+        items: { $ref: "#/$defs/Command" }
+        default: []
+      queries:
+        type: array
+        items: { $ref: "#/$defs/Query" }
+        default: []
+      read_models:
+        type: array
+        items: { $ref: "#/$defs/ReadModel" }
+        default: []
+      activities:
+        type: array
+        items: { $ref: "#/$defs/Activity" }
+        default: []
+      events:
+        type: array
+        items: { $ref: "#/$defs/Event" }
+        default: []
+      policies:
+        type: array
+        items: { $ref: "#/$defs/Policy" }
+        default: []
+      business_rules:
+        type: array
+        items: { $ref: "#/$defs/BusinessRule" }
+        default: []

@@ -1,0 +1,4486 @@
+# Commercial Banking Platform - Domain Stories
+# System: sys_cb
+# Generated: 2025-10-24
+# Version: 2.0.0
+#
+# This file contains comprehensive domain stories for the Commercial Banking Platform
+# covering all Priority 1-4 requirements PLUS MVP-specific Payedge Receivables requirements including:
+# - User Management (4 stories)
+# - Service Management (3 stories)
+# - Permission and Approval Management (3 stories)
+# - Indirect Client Management (3 stories)
+# - Employee Portal Workflows (3 stories)
+# - Self-Service Portal Workflows (3 stories)
+# - Okta Integration Lifecycles (3 stories)
+# - Express Integration Stories (3 stories)
+# - Approval Workflow Stories (5 stories)
+# - Three-Tier Relationship Stories (3 stories)
+#
+# Total: 33 comprehensive domain stories with shared actors, aggregates, and business rules
+#
+# MVP Scope:
+# - 1 large Canadian commercial client
+# - 700 business payors (NO individuals in MVP)
+# - 1050 indirect client users (avg 1.5 users per business)
+# - Dual identity: A-and-P (direct via Express) + Okta (indirect via platform)
+# - Dual portal: Employee portal (bank operations) + Self-service portal (payor independence)
+# - Generic approval workflow: Single/dual approver, amount thresholds, parallel approval
+# - Latency targets: Express <5min, Okta <2sec
+
+version: "2.0.0"
+
+domain_stories:
+
+  # ================================================================================================
+  # PRIORITY 1: CORE USER MANAGEMENT STORIES (4 stories)
+  # ================================================================================================
+
+  # Story 1: Client Profile Creation
+  - domain_story_id: dst_client_profile_creation
+    title: "Bank Creates Client Profile with Identification and Account Enrollment"
+    description: |
+      A bank administrator creates a new client profile in the commercial banking platform.
+      The profile is identified by client ID type (SRF for Canadian banking platform, GID for
+      Capital Markets global ID, or IND for indirect clients). The bank admin can choose to
+      enroll all current accounts, and optionally configure auto-enrollment for future accounts.
+      The profile type (servicing or online) determines whether user management is required.
+      Supports multi-jurisdiction: Canada (CA), US (East/West), UK.
+    tags:
+      - user_management
+      - profile_management
+      - priority_1
+      - phase_1
+
+    actors:
+      - actor_id: act_bank_admin
+        name: "Bank Administrator"
+        kind: person
+        description: "Bank employee who creates and manages client profiles and services"
+
+      - actor_id: act_account_system
+        name: "Account System"
+        kind: system
+        description: "External banking systems (DDA, RIBS, OLB, MTG, GIC, TSYS, COMCARD, GSAN) managing client accounts"
+
+    work_objects:
+      - work_object_id: wobj_client_profile
+        name: "Client Profile"
+        description: "Container for client identification, accounts, users, services, and configuration"
+        aggregate_id: agg_client_profile
+        attributes:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: client_id_type
+            type: enum
+            required: true
+            description: "SRF, GID, or IND"
+          - name: client_id_value
+            type: string
+            required: true
+          - name: profile_type
+            type: enum
+            required: true
+            description: "servicing or online"
+          - name: jurisdiction
+            type: enum
+            required: true
+            description: "CA, US_EAST, US_WEST, UK"
+          - name: auto_enroll_mode
+            type: enum
+            required: false
+            description: "manual, auto_enroll_all_current, auto_enroll_current_and_future"
+
+      - work_object_id: wobj_account_enrollment
+        name: "Account Enrollment"
+        description: "Links an account from an external system to a client profile"
+        aggregate_id: agg_account_enrollment
+        attributes:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: account_type
+            type: enum
+            required: true
+            description: "ca:dda, us:dda, ca:fca, ca:olb, ca:mtg, ca:gic, ca:tsys, ca:comcard, ca:ach"
+          - name: account_identifier
+            type: string
+            required: true
+          - name: status
+            type: enum
+            required: true
+            description: "active, inactive, closed"
+
+    aggregates:
+      - aggregate_id: agg_client_profile
+        name: "ClientProfile"
+        description: "Aggregate root for client profile with identification, accounts, and configuration"
+        root_work_object_id: wobj_client_profile
+        work_object_ids:
+          - wobj_client_profile
+          - wobj_account_enrollment
+        invariants:
+          - "Client ID type and value combination must be unique across all profiles"
+          - "Online profiles must have at least 2 administrator users (dual admin requirement)"
+
+      - aggregate_id: agg_account_enrollment
+        name: "AccountEnrollment"
+        description: "Account linked to a profile with status tracking"
+        root_work_object_id: wobj_account_enrollment
+        work_object_ids:
+          - wobj_account_enrollment
+        invariants:
+          - "Cannot enroll closed accounts from source systems"
+
+    repositories:
+      - repository_id: repo_client_profile
+        name: "ClientProfileRepository"
+        aggregate_id: agg_client_profile
+        operations:
+          - name: save_profile
+            parameters:
+              - name: profile
+                type: ref
+                ref_id: agg_client_profile
+                required: true
+            return_type: void
+          - name: find_by_id
+            parameters:
+              - name: profile_id
+                type: uuid
+                required: true
+            return_type: ref
+            return_ref_id: agg_client_profile
+
+    application_services:
+      - app_service_id: svc_app_profile_management
+        name: "ProfileManagementApplicationService"
+        description: "Orchestrates profile creation, account enrollment, and profile lifecycle"
+        commands_handled:
+          - cmd_create_client_profile
+          - cmd_enroll_account
+          - cmd_remove_account
+        queries_handled:
+          - qry_get_profile_details
+
+    commands:
+      - command_id: cmd_create_client_profile
+        name: "CreateClientProfile"
+        description: "Creates a new client profile with identification and optional account enrollment"
+        actor_ids:
+          - act_bank_admin
+        target_aggregate_id: agg_client_profile
+        parameters:
+          - name: client_id_type
+            type: enum
+            required: true
+          - name: client_id_value
+            type: string
+            required: true
+          - name: profile_type
+            type: enum
+            required: true
+          - name: jurisdiction
+            type: enum
+            required: true
+          - name: auto_enroll_mode
+            type: enum
+            required: false
+          - name: account_ids_to_enroll
+            type: json
+            required: false
+        invokes_app_services:
+          - svc_app_profile_management
+        emits_events:
+          - evt_client_profile_created
+
+      - command_id: cmd_enroll_account
+        name: "EnrollAccount"
+        description: "Enrolls an account to a client profile"
+        actor_ids:
+          - act_bank_admin
+        target_aggregate_id: agg_account_enrollment
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: account_type
+            type: enum
+            required: true
+          - name: account_identifier
+            type: string
+            required: true
+        invokes_app_services:
+          - svc_app_profile_management
+        emits_events:
+          - evt_account_enrolled
+
+      - command_id: cmd_remove_account
+        name: "RemoveAccount"
+        description: "Removes an account from a client profile"
+        actor_ids:
+          - act_bank_admin
+        target_aggregate_id: agg_account_enrollment
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: enrollment_id
+            type: uuid
+            required: true
+        invokes_app_services:
+          - svc_app_profile_management
+        emits_events:
+          - evt_account_removed
+
+    queries:
+      - query_id: qry_get_profile_details
+        name: "GetProfileDetails"
+        description: "Retrieves complete profile information including accounts and configuration"
+        actor_ids:
+          - act_bank_admin
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+        returns_read_model_id: rmdl_profile_details
+
+    read_models:
+      - read_model_id: rmdl_profile_details
+        name: "ProfileDetailsSummary"
+        description: "Complete view of client profile for display"
+        attributes:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: client_id_type
+            type: string
+            required: true
+          - name: client_id_value
+            type: string
+            required: true
+          - name: profile_type
+            type: string
+            required: true
+          - name: jurisdiction
+            type: string
+            required: true
+          - name: enrolled_accounts_count
+            type: integer
+            required: true
+
+    events:
+      - event_id: evt_client_profile_created
+        name: "ClientProfileCreated"
+        description: "A new client profile has been created in the system"
+        tense: past
+        payload:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: client_id_type
+            type: string
+            required: true
+          - name: client_id_value
+            type: string
+            required: true
+          - name: profile_type
+            type: string
+            required: true
+          - name: jurisdiction
+            type: string
+            required: true
+          - name: created_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_create_client_profile
+        affected_aggregate_id: agg_client_profile
+        policies_triggered:
+          - pol_enroll_existing_accounts
+
+      - event_id: evt_account_enrolled
+        name: "AccountEnrolled"
+        description: "An account has been enrolled to a client profile"
+        tense: past
+        payload:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: account_type
+            type: string
+            required: true
+          - name: enrolled_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_enroll_account
+        affected_aggregate_id: agg_account_enrollment
+
+      - event_id: evt_account_removed
+        name: "AccountRemoved"
+        description: "An account has been removed from a client profile"
+        tense: past
+        payload:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: removed_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_remove_account
+        affected_aggregate_id: agg_account_enrollment
+
+    policies:
+      - policy_id: pol_enroll_existing_accounts
+        name: "Enroll Existing Accounts on Profile Creation"
+        description: "When profile is created with auto-enroll mode, automatically enroll all current accounts from source systems"
+        when_event_id: evt_client_profile_created
+        issues_command_id: cmd_enroll_account
+
+    business_rules:
+      - rule_id: rle_unique_client_identifier
+        text: "Client ID type and value combination must be unique across all profiles in the system"
+        applies_to:
+          - agg_client_profile
+          - cmd_create_client_profile
+
+      - rule_id: rle_two_admins_minimum
+        text: "Online profiles must have at least 2 users with administrator role (dual admin requirement)"
+        applies_to:
+          - agg_client_profile
+
+  # Story 2: First-Time User Registration
+  - domain_story_id: dst_user_registration
+    title: "User Completes First-Time Registration with Identity Provider"
+    description: |
+      A user receives an invitation to access an online client profile. Using their email
+      and phone number, they initiate registration flow with the identity provider (currently
+      A&P, migrating to Okta). The user creates their password and completes MFA onboarding.
+      Upon completion, the identity provider sends an event that updates the user status
+      from pending_registration to active. Users are identified by logon-id (email format)
+      and can have the same logon-id across different profiles.
+    tags:
+      - user_management
+      - identity_management
+      - priority_1
+      - phase_1
+
+    actors:
+      - actor_id: act_regular_user
+        name: "Regular User"
+        kind: person
+        description: "End user who accesses the commercial banking platform"
+
+      - actor_id: act_identity_provider
+        name: "Identity Provider"
+        kind: system
+        description: "External identity management system (A&P or Okta) that handles authentication and MFA"
+
+    work_objects:
+      - work_object_id: wobj_user
+        name: "User"
+        description: "User account with identity provider integration and status tracking"
+        aggregate_id: agg_user
+        attributes:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+            description: "Email-format identifier for login"
+          - name: identity_provider
+            type: enum
+            required: true
+            description: "anp or okta"
+          - name: user_status
+            type: enum
+            required: true
+            description: "pending_registration, active, locked_by_admin, locked_by_bank"
+          - name: user_role
+            type: enum
+            required: true
+            description: "administrator or regular_user"
+
+    aggregates:
+      - aggregate_id: agg_user
+        name: "User"
+        description: "User aggregate with identity provider integration and lifecycle management"
+        root_work_object_id: wobj_user
+        work_object_ids:
+          - wobj_user
+        invariants:
+          - "Logon-id must be unique within a profile (but can repeat across profiles)"
+          - "Active users must have completed registration with identity provider"
+
+    repositories:
+      - repository_id: repo_user
+        name: "UserRepository"
+        aggregate_id: agg_user
+        operations:
+          - name: save_user
+            parameters:
+              - name: user
+                type: ref
+                ref_id: agg_user
+                required: true
+            return_type: void
+          - name: find_by_id
+            parameters:
+              - name: user_id
+                type: uuid
+                required: true
+            return_type: ref
+            return_ref_id: agg_user
+
+    application_services:
+      - app_service_id: svc_app_user_management
+        name: "UserManagementApplicationService"
+        description: "Orchestrates user lifecycle including registration, activation, and locking"
+        commands_handled:
+          - cmd_register_user
+          - cmd_activate_user
+          - cmd_lock_user
+          - cmd_unlock_user
+        queries_handled:
+          - qry_get_user_details
+
+    commands:
+      - command_id: cmd_register_user
+        name: "RegisterUser"
+        description: "Initiates user registration with identity provider"
+        actor_ids:
+          - act_bank_admin
+        target_aggregate_id: agg_user
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+          - name: email
+            type: string
+            required: true
+          - name: user_role
+            type: enum
+            required: true
+          - name: identity_provider
+            type: enum
+            required: true
+        invokes_app_services:
+          - svc_app_user_management
+        emits_events:
+          - evt_user_registered
+
+      - command_id: cmd_activate_user
+        name: "ActivateUser"
+        description: "Activates user after successful identity provider onboarding"
+        actor_ids:
+          - act_identity_provider
+        target_aggregate_id: agg_user
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: identity_provider_user_id
+            type: string
+            required: true
+        invokes_app_services:
+          - svc_app_user_management
+        emits_events:
+          - evt_user_activated
+
+      - command_id: cmd_lock_user
+        name: "LockUser"
+        description: "Locks a user account due to administrator action or bank security concerns"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        target_aggregate_id: agg_user
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: locked_by
+            type: enum
+            required: true
+            description: "admin or bank"
+          - name: reason
+            type: string
+            required: true
+        invokes_app_services:
+          - svc_app_user_management
+        emits_events:
+          - evt_user_locked
+
+      - command_id: cmd_unlock_user
+        name: "UnlockUser"
+        description: "Unlocks a user account"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        target_aggregate_id: agg_user
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: unlocked_by
+            type: string
+            required: true
+        invokes_app_services:
+          - svc_app_user_management
+        emits_events:
+          - evt_user_unlocked
+
+    queries:
+      - query_id: qry_get_user_details
+        name: "GetUserDetails"
+        description: "Retrieves complete user information including status and role"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+        returns_read_model_id: rmdl_user_details
+
+    read_models:
+      - read_model_id: rmdl_user_details
+        name: "UserDetailsSummary"
+        description: "Complete user information for display"
+        attributes:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+          - name: user_status
+            type: string
+            required: true
+          - name: user_role
+            type: string
+            required: true
+
+    events:
+      - event_id: evt_user_registered
+        name: "UserRegistered"
+        description: "User has been created and invited to complete registration with identity provider"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+          - name: registered_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_register_user
+        affected_aggregate_id: agg_user
+        policies_triggered:
+          - pol_notify_identity_provider
+
+      - event_id: evt_user_activated
+        name: "UserActivated"
+        description: "User has completed identity provider onboarding and is now active"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: activated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_activate_user
+        affected_aggregate_id: agg_user
+
+      - event_id: evt_user_locked
+        name: "UserLocked"
+        description: "User account has been locked by administrator or bank"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: locked_by
+            type: string
+            required: true
+          - name: locked_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_lock_user
+        affected_aggregate_id: agg_user
+
+      - event_id: evt_user_unlocked
+        name: "UserUnlocked"
+        description: "User account has been unlocked"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: unlocked_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_unlock_user
+        affected_aggregate_id: agg_user
+
+    policies:
+      - policy_id: pol_notify_identity_provider
+        name: "Notify Identity Provider of New User Registration"
+        description: "When user is registered, send registration request to identity provider to initiate onboarding flow"
+        when_event_id: evt_user_registered
+        issues_command_id: cmd_send_idp_registration
+
+    business_rules:
+      - rule_id: rle_unique_logon_per_profile
+        text: "Logon-id must be unique within a profile (but can repeat across different profiles)"
+        applies_to:
+          - agg_user
+          - cmd_register_user
+
+      - rule_id: rle_maintain_dual_admin
+        text: "Cannot lock or remove users if it would result in fewer than 2 administrator users in the profile"
+        applies_to:
+          - agg_user
+          - cmd_lock_user
+
+      - rule_id: rle_bank_lock_requires_bank_unlock
+        text: "Users locked by bank due to suspicious activity can only be unlocked by bank administrators"
+        applies_to:
+          - cmd_unlock_user
+
+  # Story 3: User Management by Administrator
+  - domain_story_id: dst_user_management_by_admin
+    title: "Client Administrator Manages Users Within Their Profile"
+    description: |
+      A client administrator manages users within their online profile. They can create new
+      users, assign roles (administrator or regular_user), lock/unlock user accounts (except
+      those locked by bank), and view user details. All operations must maintain the dual
+      admin requirement ensuring at least 2 administrator users exist at all times.
+    tags:
+      - user_management
+      - self_service
+      - priority_1
+      - phase_1
+
+    actors:
+      - actor_id: act_client_administrator
+        name: "Client Administrator"
+        kind: person
+        description: "Client user with administrator role who manages other users and profile configuration"
+
+    commands:
+      - command_id: cmd_change_user_role
+        name: "ChangeUserRole"
+        description: "Administrator changes a user's role between administrator and regular_user"
+        actor_ids:
+          - act_client_administrator
+        target_aggregate_id: agg_user
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: new_role
+            type: enum
+            required: true
+        preconditions:
+          - "Cannot downgrade administrator to regular_user if it violates dual admin rule"
+        invokes_app_services:
+          - svc_app_user_management
+        emits_events:
+          - evt_user_role_changed
+
+    events:
+      - event_id: evt_user_role_changed
+        name: "UserRoleChanged"
+        description: "User's role has been changed between administrator and regular_user"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: old_role
+            type: string
+            required: true
+          - name: new_role
+            type: string
+            required: true
+          - name: changed_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_change_user_role
+        affected_aggregate_id: agg_user
+
+    business_rules:
+      - rule_id: rle_admin_cannot_unlock_bank_locked
+        text: "Client administrators cannot unlock users that were locked by the bank"
+        applies_to:
+          - cmd_unlock_user
+
+  # Story 4: User Lock/Unlock Operations
+  - domain_story_id: dst_user_lock_unlock
+    title: "Bank or Administrator Locks and Unlocks User Accounts"
+    description: |
+      Users can be locked by either client administrators or bank administrators. When locked
+      by an administrator, the user cannot access the system but can be unlocked by any
+      administrator. When locked by the bank (due to suspicious activity), only bank
+      administrators can unlock the user. All lock operations must maintain dual admin rules.
+    tags:
+      - user_management
+      - security
+      - priority_1
+      - phase_1
+
+    business_rules:
+      - rule_id: rle_dual_admin_required
+        text: "Critical functions require at least two administrator users to approve"
+        applies_to:
+          - cmd_lock_user
+
+  # ================================================================================================
+  # PRIORITY 2: SERVICE MANAGEMENT STORIES (3 stories)
+  # ================================================================================================
+
+  # Story 5: Service Enrollment
+  - domain_story_id: dst_service_enrollment
+    title: "Client Enrolls in Standalone, Online, or Indirect Services"
+    description: |
+      A client profile enrolls in various types of services: standalone services (no online
+      access required like Additional Deposit Narrative or ACH Debit Block), online services
+      (require online profile and user access like Interac Send, Receivable Service, BTR),
+      or indirect services (for indirect client management like Receivable Approval Service).
+      Services can be linked to specific accounts or configured to auto-enroll all current
+      and future accounts.
+    tags:
+      - service_management
+      - enrollment
+      - priority_2
+      - phase_1
+
+    actors:
+      - actor_id: act_service_manager
+        name: "Service Manager"
+        kind: role
+        description: "Role for managing service enrollments (bank admin or client admin)"
+
+    work_objects:
+      - work_object_id: wobj_service_enrollment
+        name: "Service Enrollment"
+        description: "Links a service to a client profile with configuration and account associations"
+        aggregate_id: agg_service_enrollment
+        attributes:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: service_type
+            type: enum
+            required: true
+            description: "standalone, online, or indirect"
+          - name: service_code
+            type: string
+            required: true
+          - name: enrollment_status
+            type: enum
+            required: true
+            description: "active, suspended, terminated"
+          - name: account_enrollment_mode
+            type: enum
+            required: false
+            description: "manual, auto_enroll_all_current, auto_enroll_current_and_future"
+
+    aggregates:
+      - aggregate_id: agg_service_enrollment
+        name: "ServiceEnrollment"
+        description: "Service enrollment with account associations and configuration"
+        root_work_object_id: wobj_service_enrollment
+        work_object_ids:
+          - wobj_service_enrollment
+        invariants:
+          - "Online services can only be enrolled for online profiles"
+          - "Cannot enroll same service type multiple times for a profile"
+
+    repositories:
+      - repository_id: repo_service_enrollment
+        name: "ServiceEnrollmentRepository"
+        aggregate_id: agg_service_enrollment
+
+    application_services:
+      - app_service_id: svc_app_service_management
+        name: "ServiceManagementApplicationService"
+        description: "Orchestrates service enrollment, configuration, and lifecycle management"
+        commands_handled:
+          - cmd_enroll_service
+          - cmd_configure_service
+          - cmd_suspend_service
+        queries_handled:
+          - qry_list_profile_services
+
+    commands:
+      - command_id: cmd_enroll_service
+        name: "EnrollService"
+        description: "Enrolls a client profile in a service with initial configuration"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        target_aggregate_id: agg_service_enrollment
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: service_code
+            type: string
+            required: true
+          - name: service_type
+            type: enum
+            required: true
+          - name: configuration
+            type: json
+            required: false
+        invokes_app_services:
+          - svc_app_service_management
+        emits_events:
+          - evt_service_enrolled
+
+      - command_id: cmd_configure_service
+        name: "ConfigureService"
+        description: "Updates service-specific configuration"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        target_aggregate_id: agg_service_enrollment
+        parameters:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: configuration
+            type: json
+            required: true
+        invokes_app_services:
+          - svc_app_service_management
+        emits_events:
+          - evt_service_configured
+
+      - command_id: cmd_suspend_service
+        name: "SuspendService"
+        description: "Temporarily suspends a service enrollment"
+        actor_ids:
+          - act_bank_admin
+        target_aggregate_id: agg_service_enrollment
+        parameters:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: reason
+            type: string
+            required: true
+        invokes_app_services:
+          - svc_app_service_management
+        emits_events:
+          - evt_service_suspended
+
+      - command_id: cmd_add_account_to_service
+        name: "AddAccountToService"
+        description: "Links an additional account to a service enrollment"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        target_aggregate_id: agg_service_enrollment
+        parameters:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: account_enrollment_id
+            type: uuid
+            required: true
+        invokes_app_services:
+          - svc_app_service_management
+        emits_events:
+          - evt_account_added_to_service
+
+    queries:
+      - query_id: qry_list_profile_services
+        name: "ListProfileServices"
+        description: "Lists all service enrollments for a profile"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+        returns_read_model_id: rmdl_service_list
+
+    read_models:
+      - read_model_id: rmdl_service_list
+        name: "ServiceListSummary"
+        description: "List of service enrollments with summary information"
+        attributes:
+          - name: total_count
+            type: integer
+            required: true
+          - name: services
+            type: json
+            required: true
+
+    events:
+      - event_id: evt_service_enrolled
+        name: "ServiceEnrolled"
+        description: "A service has been enrolled for a client profile"
+        tense: past
+        payload:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: service_code
+            type: string
+            required: true
+          - name: enrolled_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_enroll_service
+        affected_aggregate_id: agg_service_enrollment
+        policies_triggered:
+          - pol_auto_enroll_accounts_to_service
+
+      - event_id: evt_service_configured
+        name: "ServiceConfigured"
+        description: "Service configuration has been updated"
+        tense: past
+        payload:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: configured_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_configure_service
+        affected_aggregate_id: agg_service_enrollment
+
+      - event_id: evt_service_suspended
+        name: "ServiceSuspended"
+        description: "Service enrollment has been suspended"
+        tense: past
+        payload:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: suspended_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_suspend_service
+        affected_aggregate_id: agg_service_enrollment
+
+      - event_id: evt_account_added_to_service
+        name: "AccountAddedToService"
+        description: "An account has been linked to a service enrollment"
+        tense: past
+        payload:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: account_enrollment_id
+            type: uuid
+            required: true
+          - name: added_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_add_account_to_service
+        affected_aggregate_id: agg_service_enrollment
+
+    policies:
+      - policy_id: pol_auto_enroll_accounts_to_service
+        name: "Auto-Enroll Accounts to Service"
+        description: "When service is enrolled with auto_enroll mode, automatically link all eligible accounts to the service"
+        when_event_id: evt_service_enrolled
+        issues_command_id: cmd_add_account_to_service
+
+    business_rules:
+      - rule_id: rle_online_service_requires_online_profile
+        text: "Online services can only be enrolled for profiles with online profile type"
+        applies_to:
+          - cmd_enroll_service
+
+      - rule_id: rle_unique_service_per_profile
+        text: "A service type can only be enrolled once per profile"
+        applies_to:
+          - cmd_enroll_service
+
+  # Story 6: Account Enrollment to Profile
+  - domain_story_id: dst_account_enrollment
+    title: "Accounts Are Enrolled to Client Profiles (Manual or Automatic)"
+    description: |
+      Accounts from various banking systems (DDA, RIBS, OLB, MTG, GIC, TSYS, COMCARD, GSAN)
+      are enrolled to client profiles either manually by bank administrators or automatically
+      based on the profile's auto-enrollment configuration. The system receives daily batch
+      feeds to detect new accounts and closed accounts, triggering appropriate enrollment
+      or status updates.
+    tags:
+      - account_management
+      - integration
+      - priority_2
+      - phase_1
+
+    actors:
+      - actor_id: act_batch_processor
+        name: "Batch Processor"
+        kind: system
+        description: "Daily batch process that detects new and closed accounts from source systems"
+
+    commands:
+      - command_id: cmd_detect_new_account
+        name: "DetectNewAccount"
+        description: "Batch process detects a new account in source system for a client"
+        actor_ids:
+          - act_batch_processor
+        target_aggregate_id: agg_account_enrollment
+        parameters:
+          - name: client_id_type
+            type: enum
+            required: true
+          - name: client_id_value
+            type: string
+            required: true
+          - name: account_type
+            type: enum
+            required: true
+          - name: account_identifier
+            type: string
+            required: true
+        invokes_app_services:
+          - svc_app_profile_management
+        emits_events:
+          - evt_new_account_detected
+
+      - command_id: cmd_detect_closed_account
+        name: "DetectClosedAccount"
+        description: "Batch process detects an account has been closed in source system"
+        actor_ids:
+          - act_batch_processor
+        target_aggregate_id: agg_account_enrollment
+        parameters:
+          - name: account_identifier
+            type: string
+            required: true
+          - name: account_type
+            type: enum
+            required: true
+        invokes_app_services:
+          - svc_app_profile_management
+        emits_events:
+          - evt_account_closed_in_source
+
+      - command_id: cmd_mark_account_inactive
+        name: "MarkAccountInactive"
+        description: "Marks an enrolled account as inactive due to closure in source system"
+        actor_ids:
+          - act_batch_processor
+        target_aggregate_id: agg_account_enrollment
+        parameters:
+          - name: enrollment_id
+            type: uuid
+            required: true
+        invokes_app_services:
+          - svc_app_profile_management
+        emits_events:
+          - evt_account_marked_inactive
+
+    events:
+      - event_id: evt_new_account_detected
+        name: "NewAccountDetected"
+        description: "A new account has been detected in source system for a client"
+        tense: past
+        payload:
+          - name: client_id_type
+            type: string
+            required: true
+          - name: client_id_value
+            type: string
+            required: true
+          - name: account_type
+            type: string
+            required: true
+          - name: detected_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_detect_new_account
+        affected_aggregate_id: agg_account_enrollment
+        policies_triggered:
+          - pol_auto_enroll_new_account
+
+      - event_id: evt_account_closed_in_source
+        name: "AccountClosedInSourceSystem"
+        description: "An account has been closed in the source banking system"
+        tense: past
+        payload:
+          - name: account_identifier
+            type: string
+            required: true
+          - name: closed_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_detect_closed_account
+        affected_aggregate_id: agg_account_enrollment
+        policies_triggered:
+          - pol_mark_account_inactive
+
+      - event_id: evt_account_marked_inactive
+        name: "AccountMarkedInactive"
+        description: "An enrolled account has been marked as inactive"
+        tense: past
+        payload:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: marked_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_mark_account_inactive
+        affected_aggregate_id: agg_account_enrollment
+
+    policies:
+      - policy_id: pol_auto_enroll_new_account
+        name: "Auto-Enroll New Account to Profile"
+        description: "When new account is detected and profile has auto_enroll_current_and_future mode, automatically enroll the account"
+        when_event_id: evt_new_account_detected
+        issues_command_id: cmd_enroll_account
+
+      - policy_id: pol_mark_account_inactive
+        name: "Mark Closed Account as Inactive"
+        description: "When account is closed in source system, mark all enrollments as inactive"
+        when_event_id: evt_account_closed_in_source
+        issues_command_id: cmd_mark_account_inactive
+
+    business_rules:
+      - rule_id: rle_account_must_be_active
+        text: "Cannot enroll accounts that are closed in source systems"
+        applies_to:
+          - cmd_enroll_account
+
+  # Story 7: Balance and Transaction Reporting Setup
+  - domain_story_id: dst_btr_setup
+    title: "Client Sets Up BTR Service with Delivery Preferences"
+    description: |
+      A client enrolls in Balance and Transaction Reporting (BTR) service. They configure
+      which DDA accounts to include, select file format (BAI, CAMT, MT), set frequency
+      (intraday or end-of-day), and choose delivery method (FTP or SWIFT). SWIFT delivery
+      is only available for CAMT and MT formats. End-of-day reports are generated every
+      business day.
+    tags:
+      - service_management
+      - reporting
+      - priority_2
+      - phase_1
+
+    commands:
+      - command_id: cmd_configure_btr_service
+        name: "ConfigureBTRService"
+        description: "Configures BTR service with file format, frequency, and delivery preferences"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        target_aggregate_id: agg_service_enrollment
+        parameters:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: file_format
+            type: enum
+            required: true
+            description: "bai, camt, or mt"
+          - name: frequency
+            type: enum
+            required: true
+            description: "intraday or eod"
+          - name: delivery_method
+            type: enum
+            required: true
+            description: "ftp or swift"
+          - name: delivery_endpoint
+            type: string
+            required: true
+        preconditions:
+          - "SWIFT delivery only available for CAMT and MT formats"
+        invokes_app_services:
+          - svc_app_service_management
+        emits_events:
+          - evt_btr_configured
+
+    events:
+      - event_id: evt_btr_configured
+        name: "BTRConfigured"
+        description: "Balance and Transaction Reporting service has been configured"
+        tense: past
+        payload:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: file_format
+            type: string
+            required: true
+          - name: configured_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_configure_btr_service
+        affected_aggregate_id: agg_service_enrollment
+
+    business_rules:
+      - rule_id: rle_swift_requires_camt_or_mt
+        text: "SWIFT delivery method is only available for CAMT and MT file formats (not BAI)"
+        applies_to:
+          - cmd_configure_btr_service
+
+      - rule_id: rle_btr_requires_dda_accounts
+        text: "BTR service can only be configured with DDA accounts"
+        applies_to:
+          - cmd_configure_btr_service
+
+  # ================================================================================================
+  # PRIORITY 3: PERMISSION AND APPROVAL STORIES (3 stories)
+  # ================================================================================================
+
+  # Story 8: Permission Policy Management
+  - domain_story_id: dst_permission_policy_management
+    title: "Administrators Define Permission Policies (Subject, Action, Resource)"
+    description: |
+      Client administrators define permission policies using an AWS IAM-like model where
+      subject is user_id, action is a URN (e.g., urn:cb:service:btr:view), and resource
+      is account_id or profile_id. Permission policies control what users can do with
+      specific resources.
+    tags:
+      - permission_management
+      - access_control
+      - priority_3
+      - phase_2
+
+    work_objects:
+      - work_object_id: wobj_permission_policy
+        name: "Permission Policy"
+        description: "IAM-style permission policy defining subject-action-resource rules"
+        aggregate_id: agg_permission_policy
+        attributes:
+          - name: policy_id
+            type: uuid
+            required: true
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: subject_user_id
+            type: uuid
+            required: true
+          - name: action_urn
+            type: string
+            required: true
+          - name: resource_id
+            type: uuid
+            required: true
+          - name: effect
+            type: enum
+            required: true
+            description: "allow or deny"
+
+    aggregates:
+      - aggregate_id: agg_permission_policy
+        name: "PermissionPolicy"
+        description: "Permission policy aggregate managing subject-action-resource rules"
+        root_work_object_id: wobj_permission_policy
+        work_object_ids:
+          - wobj_permission_policy
+        invariants:
+          - "Subject user must belong to the same profile as the policy"
+
+    repositories:
+      - repository_id: repo_permission_policy
+        name: "PermissionPolicyRepository"
+        aggregate_id: agg_permission_policy
+
+    application_services:
+      - app_service_id: svc_app_permission_management
+        name: "PermissionManagementApplicationService"
+        description: "Orchestrates permission policy lifecycle and authorization checks"
+        commands_handled:
+          - cmd_create_permission_policy
+          - cmd_delete_permission_policy
+        queries_handled:
+          - qry_check_user_permission
+
+    domain_services:
+      - domain_service_id: svc_dom_authorization
+        name: "AuthorizationDomainService"
+        description: "Evaluates permission policies to determine if user is authorized for action on resource"
+        operates_on:
+          - agg_permission_policy
+        operations:
+          - name: is_authorized
+            parameters:
+              - name: user_id
+                type: uuid
+                required: true
+              - name: action_urn
+                type: string
+                required: true
+              - name: resource_id
+                type: uuid
+                required: true
+            return_type: boolean
+
+    commands:
+      - command_id: cmd_create_permission_policy
+        name: "CreatePermissionPolicy"
+        description: "Creates a new permission policy for a user"
+        actor_ids:
+          - act_client_administrator
+        target_aggregate_id: agg_permission_policy
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: subject_user_id
+            type: uuid
+            required: true
+          - name: action_urn
+            type: string
+            required: true
+          - name: resource_id
+            type: uuid
+            required: true
+          - name: effect
+            type: enum
+            required: true
+        invokes_app_services:
+          - svc_app_permission_management
+        emits_events:
+          - evt_permission_policy_created
+
+      - command_id: cmd_delete_permission_policy
+        name: "DeletePermissionPolicy"
+        description: "Deletes a permission policy"
+        actor_ids:
+          - act_client_administrator
+        target_aggregate_id: agg_permission_policy
+        parameters:
+          - name: policy_id
+            type: uuid
+            required: true
+        invokes_app_services:
+          - svc_app_permission_management
+        emits_events:
+          - evt_permission_policy_deleted
+
+    queries:
+      - query_id: qry_check_user_permission
+        name: "CheckUserPermission"
+        description: "Checks if user is authorized to perform action on resource"
+        actor_ids:
+          - act_bank_admin
+          - act_client_administrator
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: action_urn
+            type: string
+            required: true
+          - name: resource_id
+            type: uuid
+            required: true
+        returns_read_model_id: rmdl_authorization_result
+
+    read_models:
+      - read_model_id: rmdl_authorization_result
+        name: "AuthorizationResultSummary"
+        description: "Result of authorization check"
+        attributes:
+          - name: is_authorized
+            type: boolean
+            required: true
+
+    events:
+      - event_id: evt_permission_policy_created
+        name: "PermissionPolicyCreated"
+        description: "A new permission policy has been created"
+        tense: past
+        payload:
+          - name: policy_id
+            type: uuid
+            required: true
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: created_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_create_permission_policy
+        affected_aggregate_id: agg_permission_policy
+
+      - event_id: evt_permission_policy_deleted
+        name: "PermissionPolicyDeleted"
+        description: "A permission policy has been deleted"
+        tense: past
+        payload:
+          - name: policy_id
+            type: uuid
+            required: true
+          - name: deleted_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_delete_permission_policy
+        affected_aggregate_id: agg_permission_policy
+
+    business_rules:
+      - rule_id: rle_permission_subject_in_profile
+        text: "Permission policy subject (user) must belong to the same profile as the policy"
+        applies_to:
+          - cmd_create_permission_policy
+
+  # Story 9: Approval Policy Management
+  - domain_story_id: dst_approval_policy_management
+    title: "Administrators Define Approval Rules with Number of Approvers"
+    description: |
+      Client administrators define approval policies that extend the permission model with
+      approval workflow requirements. Approval policies specify number_of_approvers and
+      optionally an approval_chain (ordered list of approvers). These policies govern
+      critical operations that require multiple approvers before execution.
+    tags:
+      - approval_management
+      - workflow
+      - priority_3
+      - phase_2
+
+    work_objects:
+      - work_object_id: wobj_approval_policy
+        name: "Approval Policy"
+        description: "Approval policy extending permission model with approval requirements"
+        aggregate_id: agg_approval_policy
+        attributes:
+          - name: policy_id
+            type: uuid
+            required: true
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: action_urn
+            type: string
+            required: true
+          - name: number_of_approvers
+            type: integer
+            required: true
+          - name: approval_chain
+            type: json
+            required: false
+
+    aggregates:
+      - aggregate_id: agg_approval_policy
+        name: "ApprovalPolicy"
+        description: "Approval policy aggregate managing approval workflow rules"
+        root_work_object_id: wobj_approval_policy
+        work_object_ids:
+          - wobj_approval_policy
+        invariants:
+          - "Number of approvers must be at least 1"
+
+    repositories:
+      - repository_id: repo_approval_policy
+        name: "ApprovalPolicyRepository"
+        aggregate_id: agg_approval_policy
+
+    application_services:
+      - app_service_id: svc_app_approval_management
+        name: "ApprovalManagementApplicationService"
+        description: "Orchestrates approval policy lifecycle and approval workflow execution"
+        commands_handled:
+          - cmd_create_approval_policy
+          - cmd_delete_approval_policy
+        queries_handled:
+          - qry_get_approval_requirements
+
+    commands:
+      - command_id: cmd_create_approval_policy
+        name: "CreateApprovalPolicy"
+        description: "Creates a new approval policy with approval requirements"
+        actor_ids:
+          - act_client_administrator
+        target_aggregate_id: agg_approval_policy
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: action_urn
+            type: string
+            required: true
+          - name: number_of_approvers
+            type: integer
+            required: true
+          - name: approval_chain
+            type: json
+            required: false
+        invokes_app_services:
+          - svc_app_approval_management
+        emits_events:
+          - evt_approval_policy_created
+
+      - command_id: cmd_delete_approval_policy
+        name: "DeleteApprovalPolicy"
+        description: "Deletes an approval policy"
+        actor_ids:
+          - act_client_administrator
+        target_aggregate_id: agg_approval_policy
+        parameters:
+          - name: policy_id
+            type: uuid
+            required: true
+        invokes_app_services:
+          - svc_app_approval_management
+        emits_events:
+          - evt_approval_policy_deleted
+
+    queries:
+      - query_id: qry_get_approval_requirements
+        name: "GetApprovalRequirements"
+        description: "Gets approval requirements for an action on a resource"
+        actor_ids:
+          - act_client_administrator
+        parameters:
+          - name: action_urn
+            type: string
+            required: true
+          - name: resource_id
+            type: uuid
+            required: false
+        returns_read_model_id: rmdl_approval_requirements
+
+    read_models:
+      - read_model_id: rmdl_approval_requirements
+        name: "ApprovalRequirementsSummary"
+        description: "Approval requirements for an action"
+        attributes:
+          - name: number_of_approvers
+            type: integer
+            required: true
+
+    events:
+      - event_id: evt_approval_policy_created
+        name: "ApprovalPolicyCreated"
+        description: "A new approval policy has been created"
+        tense: past
+        payload:
+          - name: policy_id
+            type: uuid
+            required: true
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: created_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_create_approval_policy
+        affected_aggregate_id: agg_approval_policy
+
+      - event_id: evt_approval_policy_deleted
+        name: "ApprovalPolicyDeleted"
+        description: "An approval policy has been deleted"
+        tense: past
+        payload:
+          - name: policy_id
+            type: uuid
+            required: true
+          - name: deleted_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_delete_approval_policy
+        affected_aggregate_id: agg_approval_policy
+
+    business_rules:
+      - rule_id: rle_approval_chain_sufficient_approvers
+        text: "If approval chain is specified, it must contain at least number_of_approvers users"
+        applies_to:
+          - cmd_create_approval_policy
+
+  # Story 10: Dual Admin Operations
+  - domain_story_id: dst_dual_admin_operations
+    title: "Critical Functions Requiring Two Administrators"
+    description: |
+      Critical functions in the commercial banking platform require dual admin approval
+      to execute. This ensures that no single administrator can perform sensitive operations
+      alone. The system validates that at least 2 administrator users exist in the profile
+      before allowing critical functions to proceed.
+    tags:
+      - approval_management
+      - security
+      - priority_3
+      - phase_2
+
+    domain_services:
+      - domain_service_id: svc_dom_dual_admin_validation
+        name: "DualAdminValidationDomainService"
+        description: "Validates dual admin requirements for critical functions"
+        operates_on:
+          - agg_client_profile
+          - agg_user
+        operations:
+          - name: validate_dual_admin_requirement
+            parameters:
+              - name: profile_id
+                type: uuid
+                required: true
+            return_type: boolean
+
+    commands:
+      - command_id: cmd_execute_critical_function
+        name: "ExecuteCriticalFunction"
+        description: "Executes a critical function requiring dual admin approval"
+        actor_ids:
+          - act_client_administrator
+        parameters:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: function_urn
+            type: string
+            required: true
+          - name: approver_user_ids
+            type: json
+            required: true
+        preconditions:
+          - "Profile must have at least 2 administrator users"
+        invokes_domain_services:
+          - svc_dom_dual_admin_validation
+        emits_events:
+          - evt_critical_function_executed
+
+      - command_id: cmd_send_idp_registration
+        name: "SendIDPRegistration"
+        description: "Sends registration request to identity provider"
+        actor_ids:
+          - act_identity_provider
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+
+    events:
+      - event_id: evt_critical_function_executed
+        name: "CriticalFunctionExecuted"
+        description: "A critical function has been executed with dual admin approval"
+        tense: past
+        payload:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: function_urn
+            type: string
+            required: true
+          - name: executed_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_execute_critical_function
+
+  # ================================================================================================
+  # PRIORITY 4: INDIRECT CLIENT STORIES (3 stories)
+  # ================================================================================================
+
+  # Story 11: Indirect Client Management
+  - domain_story_id: dst_indirect_client_management
+    title: "Client Manages Indirect Clients (Persons or Businesses)"
+    description: |
+      A client with indirect client management capability manages indirect clients on behalf
+      of their customers. Indirect clients can be persons (with person name) or businesses
+      (with business name, address, and related persons performing roles such as signing
+      officer, administrator, or director). The same person can perform multiple roles.
+      Indirect clients are identified with IND client ID type.
+    tags:
+      - indirect_client_management
+      - client_management
+      - priority_4
+      - phase_3
+
+    work_objects:
+      - work_object_id: wobj_indirect_client
+        name: "Indirect Client"
+        description: "Person or business managed on behalf of a client"
+        aggregate_id: agg_indirect_client
+        attributes:
+          - name: indirect_client_id
+            type: uuid
+            required: true
+          - name: parent_profile_id
+            type: uuid
+            required: true
+          - name: client_id_value
+            type: string
+            required: true
+          - name: client_type
+            type: enum
+            required: true
+            description: "person or business"
+          - name: person_name
+            type: string
+            required: false
+          - name: business_name
+            type: string
+            required: false
+
+      - work_object_id: wobj_related_person
+        name: "Related Person"
+        description: "Person associated with a business indirect client in a specific role"
+        attributes:
+          - name: person_id
+            type: uuid
+            required: true
+          - name: person_name
+            type: string
+            required: true
+          - name: roles
+            type: json
+            required: true
+
+    aggregates:
+      - aggregate_id: agg_indirect_client
+        name: "IndirectClient"
+        description: "Indirect client aggregate managing persons or businesses with related persons"
+        root_work_object_id: wobj_indirect_client
+        work_object_ids:
+          - wobj_indirect_client
+          - wobj_related_person
+        invariants:
+          - "If client_type is person, person_name must be set"
+          - "If client_type is business, business_name must be set"
+
+    repositories:
+      - repository_id: repo_indirect_client
+        name: "IndirectClientRepository"
+        aggregate_id: agg_indirect_client
+
+    application_services:
+      - app_service_id: svc_app_indirect_client_management
+        name: "IndirectClientManagementApplicationService"
+        description: "Orchestrates indirect client lifecycle and related person management"
+        commands_handled:
+          - cmd_create_indirect_client
+          - cmd_add_related_person
+        queries_handled:
+          - qry_list_indirect_clients
+
+    commands:
+      - command_id: cmd_create_indirect_client
+        name: "CreateIndirectClient"
+        description: "Creates a new indirect client (person or business)"
+        actor_ids:
+          - act_client_administrator
+        target_aggregate_id: agg_indirect_client
+        parameters:
+          - name: parent_profile_id
+            type: uuid
+            required: true
+          - name: client_type
+            type: enum
+            required: true
+          - name: person_name
+            type: string
+            required: false
+          - name: business_name
+            type: string
+            required: false
+        invokes_app_services:
+          - svc_app_indirect_client_management
+        emits_events:
+          - evt_indirect_client_created
+
+      - command_id: cmd_add_related_person
+        name: "AddRelatedPerson"
+        description: "Adds a related person to a business indirect client"
+        actor_ids:
+          - act_client_administrator
+        target_aggregate_id: agg_indirect_client
+        parameters:
+          - name: indirect_client_id
+            type: uuid
+            required: true
+          - name: person_name
+            type: string
+            required: true
+          - name: roles
+            type: json
+            required: true
+        invokes_app_services:
+          - svc_app_indirect_client_management
+        emits_events:
+          - evt_related_person_added
+
+    queries:
+      - query_id: qry_list_indirect_clients
+        name: "ListIndirectClients"
+        description: "Lists all indirect clients for a parent profile"
+        actor_ids:
+          - act_client_administrator
+        parameters:
+          - name: parent_profile_id
+            type: uuid
+            required: true
+        returns_read_model_id: rmdl_indirect_client_list
+
+    read_models:
+      - read_model_id: rmdl_indirect_client_list
+        name: "IndirectClientListSummary"
+        description: "List of indirect clients with summary information"
+        attributes:
+          - name: total_count
+            type: integer
+            required: true
+          - name: indirect_clients
+            type: json
+            required: true
+
+    events:
+      - event_id: evt_indirect_client_created
+        name: "IndirectClientCreated"
+        description: "A new indirect client has been created"
+        tense: past
+        payload:
+          - name: indirect_client_id
+            type: uuid
+            required: true
+          - name: parent_profile_id
+            type: uuid
+            required: true
+          - name: created_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_create_indirect_client
+        affected_aggregate_id: agg_indirect_client
+
+      - event_id: evt_related_person_added
+        name: "RelatedPersonAdded"
+        description: "A related person has been added to a business indirect client"
+        tense: past
+        payload:
+          - name: indirect_client_id
+            type: uuid
+            required: true
+          - name: person_id
+            type: uuid
+            required: true
+          - name: added_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_add_related_person
+        affected_aggregate_id: agg_indirect_client
+
+    business_rules:
+      - rule_id: rle_person_type_requires_person_name
+        text: "Indirect clients of type person must have person_name set"
+        applies_to:
+          - cmd_create_indirect_client
+
+      - rule_id: rle_business_type_requires_business_name
+        text: "Indirect clients of type business must have business_name set"
+        applies_to:
+          - cmd_create_indirect_client
+
+      - rule_id: rle_related_persons_only_for_business
+        text: "Related persons can only be added to indirect clients of type business"
+        applies_to:
+          - cmd_add_related_person
+
+  # Story 12: Indirect Client User Management
+  - domain_story_id: dst_indirect_client_user_management
+    title: "Indirect Clients Manage Their Own Users and Permissions"
+    description: |
+      Indirect clients that have online access can manage their own users, permissions, and
+      approval rules. They operate within an indirect service profile that provides them
+      with limited capabilities scoped to their own operations.
+    tags:
+      - indirect_client_management
+      - user_management
+      - self_service
+      - priority_4
+      - phase_3
+
+    actors:
+      - actor_id: act_indirect_client_admin
+        name: "Indirect Client Administrator"
+        kind: person
+        description: "Administrator user for an indirect client managing their users and permissions"
+
+    commands:
+      - command_id: cmd_register_indirect_client_user
+        name: "RegisterIndirectClientUser"
+        description: "Registers a new user for an indirect client"
+        actor_ids:
+          - act_indirect_client_admin
+        target_aggregate_id: agg_user
+        parameters:
+          - name: indirect_client_profile_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+          - name: email
+            type: string
+            required: true
+        invokes_app_services:
+          - svc_app_user_management
+        emits_events:
+          - evt_user_registered
+
+    business_rules:
+      - rule_id: rle_indirect_client_scoped_permissions
+        text: "Indirect client administrators can only manage users and permissions within their own indirect client profile"
+        applies_to:
+          - cmd_register_indirect_client_user
+
+  # Story 13: Receivable Service with Payors
+  - domain_story_id: dst_receivable_service_with_payors
+    title: "Indirect Clients Act as Payors for Receivables"
+    description: |
+      A client enrolls in the Receivable Service, which enables them to manage receivables
+      from indirect clients (payors). The service links to GSAN accounts enrolled in the
+      service. Indirect clients in the role of payor can view invoices and make payments
+      from their Canadian bank accounts through the Receivable Approval Service.
+    tags:
+      - service_management
+      - indirect_client_management
+      - receivables
+      - priority_4
+      - phase_3
+
+    actors:
+      - actor_id: act_indirect_client_payor
+        name: "Indirect Client Payor"
+        kind: person
+        description: "Indirect client user acting as payor for receivables"
+
+    work_objects:
+      - work_object_id: wobj_invoice
+        name: "Invoice"
+        description: "Receivable invoice for payment by payor"
+        attributes:
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: payor_indirect_client_id
+            type: uuid
+            required: true
+          - name: amount
+            type: money
+            required: true
+          - name: status
+            type: enum
+            required: true
+            description: "pending, paid, overdue"
+
+    commands:
+      - command_id: cmd_configure_receivable_service
+        name: "ConfigureReceivableService"
+        description: "Configures receivable service with GSAN accounts and payors"
+        actor_ids:
+          - act_client_administrator
+        target_aggregate_id: agg_service_enrollment
+        parameters:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: gsan_account_ids
+            type: json
+            required: true
+          - name: payor_indirect_client_ids
+            type: json
+            required: true
+        preconditions:
+          - "All account IDs must be GSAN accounts (ca:ach)"
+        invokes_app_services:
+          - svc_app_service_management
+        emits_events:
+          - evt_receivable_service_configured
+
+      - command_id: cmd_pay_invoice
+        name: "PayInvoice"
+        description: "Payor pays an invoice using their Canadian bank account"
+        actor_ids:
+          - act_indirect_client_payor
+        parameters:
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: payment_account_id
+            type: uuid
+            required: true
+        invokes_app_services:
+          - svc_app_service_management
+        emits_events:
+          - evt_invoice_paid
+
+    events:
+      - event_id: evt_receivable_service_configured
+        name: "ReceivableServiceConfigured"
+        description: "Receivable service has been configured with GSAN accounts and payors"
+        tense: past
+        payload:
+          - name: enrollment_id
+            type: uuid
+            required: true
+          - name: configured_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_configure_receivable_service
+        affected_aggregate_id: agg_service_enrollment
+
+      - event_id: evt_invoice_paid
+        name: "InvoicePaid"
+        description: "A receivable invoice has been paid by the payor"
+        tense: past
+        payload:
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: paid_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_pay_invoice
+
+    business_rules:
+      - rule_id: rle_receivable_requires_gsan_accounts
+        text: "Receivable service can only be configured with GSAN (ca:ach) accounts"
+        applies_to:
+          - cmd_configure_receivable_service
+
+  # ================================================================================================
+  # MVP PRIORITY: EMPLOYEE PORTAL WORKFLOWS (3 stories)
+  # ================================================================================================
+
+  # Story 14: Employee Portal Client Enrollment
+  - domain_story_id: dst_employee_portal_client_enrollment
+    title: "Bank Employee Enrolls Large Canadian Client to Online Profile via Employee Portal"
+    description: |
+      A bank employee uses the employee portal to enroll a large Canadian commercial client to
+      an online profile with site-id linking to Express for user synchronization. The employee
+      configures the profile for receivable service with 700 business payors, establishes the
+      three-tier relationship (Bank → Client → Payors), and initiates user replication from
+      Express via event streaming. This is the primary workflow for the MVP launch supporting
+      Payedge Receivables initiative with one large client by June 2026.
+    tags:
+      - employee_portal
+      - client_enrollment
+      - mvp
+      - priority_mvp
+
+    actors:
+      - actor_id: act_bank_employee_portal_user
+        name: "Bank Employee Portal User"
+        kind: person
+        description: "Bank employee managing client enrollments and monitoring indirect client relationships via employee portal"
+
+    work_objects:
+      - work_object_id: wobj_enrollment_workflow
+        name: "Enrollment Workflow"
+        description: "Multi-step workflow for enrolling client to online profile with Express integration"
+        aggregate_id: agg_enrollment_workflow
+        attributes:
+          - name: workflow_id
+            type: uuid
+            required: true
+          - name: client_profile_id
+            type: uuid
+            required: true
+          - name: site_id
+            type: string
+            required: true
+            description: "Linking key to Express profile for user synchronization"
+          - name: enrollment_status
+            type: enum
+            required: true
+            description: "initiated, express_linked, users_syncing, completed, failed"
+
+    aggregates:
+      - aggregate_id: agg_enrollment_workflow
+        name: "EnrollmentWorkflow"
+        description: "Enrollment workflow aggregate managing multi-step client onboarding process"
+        root_work_object_id: wobj_enrollment_workflow
+        work_object_ids:
+          - wobj_enrollment_workflow
+        invariants:
+          - "Site-id must be unique and valid in Express system"
+          - "Enrollment cannot complete until initial user synchronization succeeds"
+
+      - aggregate_id: agg_employee_portal_session
+        name: "EmployeePortalSession"
+        description: "Employee portal session aggregate tracking bank employee operations"
+        invariants:
+          - "Employee must have portal access permissions"
+          - "Session must be authenticated via bank identity provider"
+
+    commands:
+      - command_id: cmd_enroll_client_online_profile
+        name: "EnrollClientOnlineProfile"
+        description: "Enrolls large Canadian client to online profile with site-id linking to Express"
+        actor_ids:
+          - act_bank_employee_portal_user
+        target_aggregate_id: agg_enrollment_workflow
+        parameters:
+          - name: client_id_value
+            type: string
+            required: true
+            description: "SRF client ID for large Canadian client"
+          - name: site_id
+            type: string
+            required: true
+            description: "Express site-id for user synchronization linking"
+          - name: jurisdiction
+            type: enum
+            required: true
+            description: "CA for Canadian client"
+        emits_events:
+          - evt_client_online_profile_enrolled
+          - evt_express_linking_initiated
+
+      - command_id: cmd_link_express_profile
+        name: "LinkExpressProfile"
+        description: "Links online profile to Express profile via site-id for user event synchronization"
+        actor_ids:
+          - act_bank_employee_portal_user
+        target_aggregate_id: agg_enrollment_workflow
+        parameters:
+          - name: enrollment_workflow_id
+            type: uuid
+            required: true
+          - name: site_id
+            type: string
+            required: true
+        emits_events:
+          - evt_express_profile_linked
+
+    events:
+      - event_id: evt_client_online_profile_enrolled
+        name: "ClientOnlineProfileEnrolled"
+        description: "Large Canadian client has been enrolled to online profile via employee portal"
+        tense: past
+        payload:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: client_id_value
+            type: string
+            required: true
+          - name: site_id
+            type: string
+            required: true
+          - name: enrolled_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_enroll_client_online_profile
+        affected_aggregate_id: agg_enrollment_workflow
+
+      - event_id: evt_express_linking_initiated
+        name: "ExpressLinkingInitiated"
+        description: "Linking to Express profile has been initiated for user synchronization"
+        tense: past
+        payload:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: site_id
+            type: string
+            required: true
+        caused_by:
+          command_id: cmd_enroll_client_online_profile
+        affected_aggregate_id: agg_enrollment_workflow
+        policies_triggered:
+          - pol_validate_express_site_id
+
+      - event_id: evt_express_profile_linked
+        name: "ExpressProfileLinked"
+        description: "Online profile successfully linked to Express profile via site-id"
+        tense: past
+        payload:
+          - name: profile_id
+            type: uuid
+            required: true
+          - name: site_id
+            type: string
+            required: true
+          - name: linked_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_link_express_profile
+        affected_aggregate_id: agg_enrollment_workflow
+        policies_triggered:
+          - pol_initiate_user_synchronization
+
+    policies:
+      - policy_id: pol_validate_express_site_id
+        name: "Validate Express Site-ID on Linking Initiation"
+        description: "When Express linking is initiated, validate site-id exists and is accessible in Express system"
+        when_event_id: evt_express_linking_initiated
+        issues_command_id: cmd_validate_site_id
+
+      - policy_id: pol_initiate_user_synchronization
+        name: "Initiate User Synchronization After Express Linking"
+        description: "When Express profile is linked, initiate user event synchronization to replicate direct client users"
+        when_event_id: evt_express_profile_linked
+        issues_command_id: cmd_start_user_sync_stream
+
+    business_rules:
+      - rule_id: rle_mvp_single_primary_client
+        text: "MVP supports single primary client only (no secondary client linking)"
+        applies_to:
+          - cmd_enroll_client_online_profile
+
+      - rule_id: rle_site_id_required_for_express_sync
+        text: "Online profile must have site-id to enable user synchronization from Express"
+        applies_to:
+          - cmd_enroll_client_online_profile
+
+  # Story 15: Employee Portal Payor Onboarding
+  - domain_story_id: dst_employee_portal_payor_onboarding
+    title: "Bank Employee Onboards 700 Business Payors via Employee Portal"
+    description: |
+      A bank employee uses the employee portal to onboard 700 business payors (indirect clients)
+      for the large Canadian client enrolled in receivable service. Each payor is a business
+      entity with business name, address, and related persons performing roles (signing officer,
+      administrator, director). The employee can perform bulk onboarding via batch upload or
+      individual payor creation. NO individual person payors are supported in MVP - only
+      businesses. This establishes the three-tier relationship: Bank → Direct Client → 700 Payors.
+    tags:
+      - employee_portal
+      - payor_onboarding
+      - mvp
+      - priority_mvp
+
+    work_objects:
+      - work_object_id: wobj_payor_onboarding_batch
+        name: "Payor Onboarding Batch"
+        description: "Batch container for bulk onboarding of 700 business payors"
+        aggregate_id: agg_payor_onboarding_batch
+        attributes:
+          - name: batch_id
+            type: uuid
+            required: true
+          - name: parent_profile_id
+            type: uuid
+            required: true
+            description: "Large client profile ID"
+          - name: total_payors
+            type: integer
+            required: true
+            description: "Total payors in batch (target: 700)"
+          - name: payors_onboarded
+            type: integer
+            required: true
+          - name: batch_status
+            type: enum
+            required: true
+            description: "pending, processing, completed, failed"
+
+      - work_object_id: wobj_business_payor
+        name: "Business Payor"
+        description: "Business indirect client with related persons in various roles"
+        aggregate_id: agg_business_payor
+        attributes:
+          - name: payor_id
+            type: uuid
+            required: true
+          - name: parent_profile_id
+            type: uuid
+            required: true
+          - name: business_name
+            type: string
+            required: true
+          - name: business_address
+            type: string
+            required: true
+          - name: related_persons
+            type: json
+            required: true
+            description: "Array of related persons with roles"
+
+    aggregates:
+      - aggregate_id: agg_payor_onboarding_batch
+        name: "PayorOnboardingBatch"
+        description: "Batch onboarding aggregate managing bulk payor creation for large client"
+        root_work_object_id: wobj_payor_onboarding_batch
+        work_object_ids:
+          - wobj_payor_onboarding_batch
+        invariants:
+          - "Batch must complete within acceptable time window (< 24 hours)"
+          - "Failed payor onboarding must not block batch completion"
+
+      - aggregate_id: agg_business_payor
+        name: "BusinessPayor"
+        description: "Business payor aggregate with related persons performing roles"
+        root_work_object_id: wobj_business_payor
+        work_object_ids:
+          - wobj_business_payor
+        invariants:
+          - "Business payor must have at least one related person with administrator role"
+          - "Business name must be unique within parent client profile"
+
+    commands:
+      - command_id: cmd_create_payor_onboarding_batch
+        name: "CreatePayorOnboardingBatch"
+        description: "Creates batch for onboarding 700 business payors via employee portal"
+        actor_ids:
+          - act_bank_employee_portal_user
+        target_aggregate_id: agg_payor_onboarding_batch
+        parameters:
+          - name: parent_profile_id
+            type: uuid
+            required: true
+          - name: payor_data_file
+            type: string
+            required: true
+            description: "CSV file path with 700 business payor records"
+        emits_events:
+          - evt_payor_onboarding_batch_created
+
+      - command_id: cmd_onboard_business_payor
+        name: "OnboardBusinessPayor"
+        description: "Onboards individual business payor with related persons"
+        actor_ids:
+          - act_bank_employee_portal_user
+        target_aggregate_id: agg_business_payor
+        parameters:
+          - name: parent_profile_id
+            type: uuid
+            required: true
+          - name: business_name
+            type: string
+            required: true
+          - name: business_address
+            type: string
+            required: true
+          - name: related_persons
+            type: json
+            required: true
+        emits_events:
+          - evt_business_payor_onboarded
+
+      - command_id: cmd_assign_payor_role
+        name: "AssignPayorRole"
+        description: "Assigns role to related person in business payor (signing_officer, administrator, director)"
+        actor_ids:
+          - act_bank_employee_portal_user
+        target_aggregate_id: agg_business_payor
+        parameters:
+          - name: payor_id
+            type: uuid
+            required: true
+          - name: person_name
+            type: string
+            required: true
+          - name: role
+            type: enum
+            required: true
+            description: "signing_officer, administrator, director"
+        emits_events:
+          - evt_payor_role_assigned
+
+    events:
+      - event_id: evt_payor_onboarding_batch_created
+        name: "PayorOnboardingBatchCreated"
+        description: "Batch for onboarding 700 business payors has been created"
+        tense: past
+        payload:
+          - name: batch_id
+            type: uuid
+            required: true
+          - name: parent_profile_id
+            type: uuid
+            required: true
+          - name: total_payors
+            type: integer
+            required: true
+          - name: created_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_create_payor_onboarding_batch
+        affected_aggregate_id: agg_payor_onboarding_batch
+        policies_triggered:
+          - pol_process_payor_batch
+
+      - event_id: evt_business_payor_onboarded
+        name: "BusinessPayorOnboarded"
+        description: "Business payor has been onboarded with related persons"
+        tense: past
+        payload:
+          - name: payor_id
+            type: uuid
+            required: true
+          - name: parent_profile_id
+            type: uuid
+            required: true
+          - name: business_name
+            type: string
+            required: true
+          - name: onboarded_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_onboard_business_payor
+        affected_aggregate_id: agg_business_payor
+        policies_triggered:
+          - pol_create_payor_profile
+
+      - event_id: evt_payor_role_assigned
+        name: "PayorRoleAssigned"
+        description: "Role has been assigned to related person in business payor"
+        tense: past
+        payload:
+          - name: payor_id
+            type: uuid
+            required: true
+          - name: person_name
+            type: string
+            required: true
+          - name: role
+            type: string
+            required: true
+          - name: assigned_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_assign_payor_role
+        affected_aggregate_id: agg_business_payor
+
+    policies:
+      - policy_id: pol_process_payor_batch
+        name: "Process Payor Batch on Batch Creation"
+        description: "When payor onboarding batch is created, process all payors and create indirect client profiles"
+        when_event_id: evt_payor_onboarding_batch_created
+        issues_command_id: cmd_onboard_business_payor
+
+      - policy_id: pol_create_payor_profile
+        name: "Create Payor Profile on Business Payor Onboarded"
+        description: "When business payor is onboarded, create indirect client profile for self-service portal access"
+        when_event_id: evt_business_payor_onboarded
+        issues_command_id: cmd_create_indirect_client
+
+    business_rules:
+      - rule_id: rle_business_payor_only_in_mvp
+        text: "MVP supports business payors only - NO individual person payors"
+        applies_to:
+          - cmd_onboard_business_payor
+
+      - rule_id: rle_mvp_700_payors_target
+        text: "MVP targets onboarding 700 business payors for large Canadian client"
+        applies_to:
+          - cmd_create_payor_onboarding_batch
+
+      - rule_id: rle_related_person_administrator_required
+        text: "Business payor must have at least one related person with administrator role"
+        applies_to:
+          - cmd_onboard_business_payor
+
+  # Story 16: Employee Portal Relationship Monitoring
+  - domain_story_id: dst_employee_portal_relationship_monitoring
+    title: "Bank Employee Monitors Three-Tier Relationships via Employee Portal Dashboard"
+    description: |
+      A bank employee uses the employee portal dashboard to monitor three-tier relationships:
+      Bank → Direct Client (large Canadian commercial client) → Indirect Clients (700 business
+      payors). The dashboard provides unified view into client enrollment status, payor onboarding
+      progress, user counts (direct client users replicated from Express + 1050 indirect client
+      users in Okta), approval rule configurations, and receivable service activity. This enables
+      proactive relationship management and operational oversight for the MVP launch.
+    tags:
+      - employee_portal
+      - relationship_monitoring
+      - mvp
+      - priority_mvp
+
+    work_objects:
+      - work_object_id: wobj_relationship_dashboard
+        name: "Relationship Dashboard"
+        description: "Unified view into three-tier Bank → Client → Payors relationships"
+        attributes:
+          - name: parent_client_profile_id
+            type: uuid
+            required: true
+          - name: total_payors
+            type: integer
+            required: true
+            description: "Total business payors onboarded (target: 700)"
+          - name: total_indirect_users
+            type: integer
+            required: true
+            description: "Total indirect client users in Okta (target: 1050)"
+          - name: total_direct_users
+            type: integer
+            required: true
+            description: "Total direct client users replicated from Express"
+          - name: total_approval_rules
+            type: integer
+            required: true
+            description: "Total approval rules configured (target: 700)"
+          - name: receivable_service_status
+            type: enum
+            required: true
+            description: "active, suspended, pending_activation"
+
+    read_models:
+      - read_model_id: rmdl_relationship_dashboard
+        name: "RelationshipDashboardSummary"
+        description: "Read model projection for employee portal dashboard with three-tier relationship metrics"
+        attributes:
+          - name: parent_client_id
+            type: string
+            required: true
+          - name: parent_client_name
+            type: string
+            required: true
+          - name: total_payors_onboarded
+            type: integer
+            required: true
+          - name: total_indirect_users_okta
+            type: integer
+            required: true
+          - name: total_direct_users_express
+            type: integer
+            required: true
+          - name: total_approval_rules_configured
+            type: integer
+            required: true
+          - name: receivable_service_enrollment_status
+            type: string
+            required: true
+          - name: express_sync_status
+            type: string
+            required: true
+          - name: okta_integration_status
+            type: string
+            required: true
+
+    queries:
+      - query_id: qry_view_relationship_dashboard
+        name: "ViewRelationshipDashboard"
+        description: "Retrieves relationship dashboard for employee portal with three-tier metrics"
+        actor_ids:
+          - act_bank_employee_portal_user
+        parameters:
+          - name: parent_client_profile_id
+            type: uuid
+            required: true
+        returns_read_model_id: rmdl_relationship_dashboard
+
+      - query_id: qry_list_payors_for_client
+        name: "ListPayorsForClient"
+        description: "Lists all 700 business payors for large client with status and user counts"
+        actor_ids:
+          - act_bank_employee_portal_user
+        parameters:
+          - name: parent_profile_id
+            type: uuid
+            required: true
+        returns_read_model_id: rmdl_payor_list
+
+    read_models:
+      - read_model_id: rmdl_payor_list
+        name: "PayorListSummary"
+        description: "List of business payors with summary information"
+        attributes:
+          - name: total_count
+            type: integer
+            required: true
+          - name: payors
+            type: json
+            required: true
+
+    business_rules:
+      - rule_id: rle_dashboard_real_time_metrics
+        text: "Employee portal dashboard must display near real-time metrics (<5 min latency for Express, <2 sec for Okta)"
+        applies_to:
+          - qry_view_relationship_dashboard
+
+  # ================================================================================================
+  # MVP PRIORITY: SELF-SERVICE PORTAL WORKFLOWS (3 stories)
+  # ================================================================================================
+
+  # Story 17: Payor Self-Service User Management
+  - domain_story_id: dst_payor_self_service_user_management
+    title: "Payor Manages Users via Self-Service Portal with Okta Integration"
+    description: |
+      A business payor administrator uses the self-service portal to independently manage their
+      users in Okta. The payor can create new users (avg 1.5 users per business across 700
+      payors = 1050 total users), assign roles, activate/deactivate users, lock/unlock accounts,
+      and update user profiles. All user lifecycle operations are performed via platform → Okta
+      integration with <2 second latency. The platform creates and fully manages indirect client
+      users in Okta (platform owns lifecycle), providing self-service independence without
+      requiring bank employee intervention for routine user management tasks.
+    tags:
+      - self_service_portal
+      - user_management
+      - okta_integration
+      - mvp
+      - priority_mvp
+
+    actors:
+      - actor_id: act_payor_portal_user
+        name: "Payor Portal User"
+        kind: person
+        description: "Business payor administrator accessing self-service portal to manage users, permissions, and approval rules"
+
+      - actor_id: act_okta_system
+        name: "Okta System"
+        kind: system
+        description: "Okta identity provider managing indirect client user authentication and lifecycle"
+
+    aggregates:
+      - aggregate_id: agg_user_self_service
+        name: "UserSelfService"
+        description: "Self-service user management aggregate enabling payors to manage their Okta users independently"
+        invariants:
+          - "Payor can only manage users within their own indirect client profile"
+          - "User creation must complete in Okta within 2 seconds"
+
+      - aggregate_id: agg_payor_portal_session
+        name: "PayorPortalSession"
+        description: "Payor self-service portal session aggregate with Okta authentication"
+        invariants:
+          - "Payor must authenticate via Okta to access self-service portal"
+          - "Session must have valid Okta token"
+
+    commands:
+      - command_id: cmd_payor_create_user_in_okta
+        name: "PayorCreateUserInOkta"
+        description: "Payor creates new user via self-service portal, platform provisions user in Okta"
+        actor_ids:
+          - act_payor_portal_user
+        target_aggregate_id: agg_user_self_service
+        parameters:
+          - name: indirect_client_profile_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+          - name: email
+            type: string
+            required: true
+          - name: user_role
+            type: enum
+            required: true
+            description: "administrator or regular_user"
+        emits_events:
+          - evt_payor_user_creation_requested
+          - evt_okta_user_provisioning_initiated
+
+      - command_id: cmd_payor_update_user_in_okta
+        name: "PayorUpdateUserInOkta"
+        description: "Payor updates user profile via self-service portal, platform updates user in Okta"
+        actor_ids:
+          - act_payor_portal_user
+        target_aggregate_id: agg_user_self_service
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: profile_updates
+            type: json
+            required: true
+        emits_events:
+          - evt_payor_user_update_requested
+          - evt_okta_user_update_initiated
+
+      - command_id: cmd_payor_deactivate_user_in_okta
+        name: "PayorDeactivateUserInOkta"
+        description: "Payor deactivates user via self-service portal, platform deactivates user in Okta"
+        actor_ids:
+          - act_payor_portal_user
+        target_aggregate_id: agg_user_self_service
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+        emits_events:
+          - evt_payor_user_deactivation_requested
+          - evt_okta_user_deactivation_initiated
+
+    events:
+      - event_id: evt_payor_user_creation_requested
+        name: "PayorUserCreationRequested"
+        description: "Payor has requested user creation via self-service portal"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: indirect_client_profile_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+          - name: requested_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_payor_create_user_in_okta
+        affected_aggregate_id: agg_user_self_service
+        policies_triggered:
+          - pol_auto_create_okta_user_on_payor_user_creation
+
+      - event_id: evt_okta_user_provisioning_initiated
+        name: "OktaUserProvisioningInitiated"
+        description: "Platform has initiated user provisioning in Okta"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_request_id
+            type: string
+            required: true
+          - name: initiated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_payor_create_user_in_okta
+        affected_aggregate_id: agg_user_self_service
+
+      - event_id: evt_payor_user_update_requested
+        name: "PayorUserUpdateRequested"
+        description: "Payor has requested user update via self-service portal"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: requested_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_payor_update_user_in_okta
+        affected_aggregate_id: agg_user_self_service
+        policies_triggered:
+          - pol_auto_update_okta_user_on_payor_update
+
+      - event_id: evt_okta_user_update_initiated
+        name: "OktaUserUpdateInitiated"
+        description: "Platform has initiated user update in Okta"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_request_id
+            type: string
+            required: true
+          - name: initiated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_payor_update_user_in_okta
+        affected_aggregate_id: agg_user_self_service
+
+      - event_id: evt_payor_user_deactivation_requested
+        name: "PayorUserDeactivationRequested"
+        description: "Payor has requested user deactivation via self-service portal"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: requested_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_payor_deactivate_user_in_okta
+        affected_aggregate_id: agg_user_self_service
+        policies_triggered:
+          - pol_auto_deactivate_okta_user_on_payor_deactivation
+
+      - event_id: evt_okta_user_deactivation_initiated
+        name: "OktaUserDeactivationInitiated"
+        description: "Platform has initiated user deactivation in Okta"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_request_id
+            type: string
+            required: true
+          - name: initiated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_payor_deactivate_user_in_okta
+        affected_aggregate_id: agg_user_self_service
+
+    policies:
+      - policy_id: pol_auto_create_okta_user_on_payor_user_creation
+        name: "Auto-Create Okta User on Payor User Creation Request"
+        description: "When payor requests user creation via self-service portal, automatically provision user in Okta"
+        when_event_id: evt_payor_user_creation_requested
+        issues_command_id: cmd_create_okta_user
+
+      - policy_id: pol_auto_update_okta_user_on_payor_update
+        name: "Auto-Update Okta User on Payor User Update Request"
+        description: "When payor requests user update via self-service portal, automatically update user in Okta"
+        when_event_id: evt_payor_user_update_requested
+        issues_command_id: cmd_update_okta_user
+
+      - policy_id: pol_auto_deactivate_okta_user_on_payor_deactivation
+        name: "Auto-Deactivate Okta User on Payor Deactivation Request"
+        description: "When payor requests user deactivation via self-service portal, automatically deactivate user in Okta"
+        when_event_id: evt_payor_user_deactivation_requested
+        issues_command_id: cmd_deactivate_okta_user
+
+    business_rules:
+      - rule_id: rle_okta_for_indirect_clients
+        text: "Indirect clients (payors) use Okta for authentication (NOT A-and-P)"
+        applies_to:
+          - cmd_payor_create_user_in_okta
+
+      - rule_id: rle_platform_owns_indirect_user_lifecycle
+        text: "Platform fully manages indirect client user lifecycle in Okta (create, update, activate, deactivate, lock, unlock)"
+        applies_to:
+          - cmd_payor_create_user_in_okta
+          - cmd_payor_update_user_in_okta
+          - cmd_payor_deactivate_user_in_okta
+
+      - rule_id: rle_okta_provisioning_within_2_seconds
+        text: "Okta user provisioning must complete within 2 seconds from platform request"
+        applies_to:
+          - cmd_payor_create_user_in_okta
+          - cmd_payor_update_user_in_okta
+
+      - rule_id: rle_payor_scoped_user_management
+        text: "Payors can only manage users within their own indirect client profile via self-service portal"
+        applies_to:
+          - cmd_payor_create_user_in_okta
+
+  # Story 18: Payor Self-Service Permission Configuration
+  - domain_story_id: dst_payor_self_service_permission_config
+    title: "Payor Configures Permissions for Users via Self-Service Portal"
+    description: |
+      A business payor administrator uses the self-service portal to configure permission policies
+      for their users. The payor defines subject (user_id), action (URN like urn:cb:receivable:approve),
+      and resource (account_id or invoice_id) rules following AWS IAM-like model. Permission
+      policies control what users can do with receivable approval workflows, invoice viewing,
+      payment submission, and approval rule configuration. This enables payors to independently
+      manage access control without bank employee intervention, supporting self-service independence
+      for 700 business payors in MVP.
+    tags:
+      - self_service_portal
+      - permission_management
+      - mvp
+      - priority_mvp
+
+    aggregates:
+      - aggregate_id: agg_permission_self_service
+        name: "PermissionSelfService"
+        description: "Self-service permission management aggregate enabling payors to configure permission policies"
+        invariants:
+          - "Permission policies scoped to payor's indirect client profile"
+          - "Payor cannot create permissions for users outside their profile"
+
+    commands:
+      - command_id: cmd_payor_configure_permissions
+        name: "PayorConfigurePermissions"
+        description: "Payor configures permission policies for their users via self-service portal"
+        actor_ids:
+          - act_payor_portal_user
+        target_aggregate_id: agg_permission_self_service
+        parameters:
+          - name: indirect_client_profile_id
+            type: uuid
+            required: true
+          - name: subject_user_id
+            type: uuid
+            required: true
+          - name: action_urn
+            type: string
+            required: true
+            description: "e.g., urn:cb:receivable:approve, urn:cb:invoice:view"
+          - name: resource_id
+            type: uuid
+            required: true
+          - name: effect
+            type: enum
+            required: true
+            description: "allow or deny"
+        emits_events:
+          - evt_payor_permission_configured
+
+    events:
+      - event_id: evt_payor_permission_configured
+        name: "PayorPermissionConfigured"
+        description: "Payor has configured permission policy via self-service portal"
+        tense: past
+        payload:
+          - name: policy_id
+            type: uuid
+            required: true
+          - name: indirect_client_profile_id
+            type: uuid
+            required: true
+          - name: subject_user_id
+            type: uuid
+            required: true
+          - name: action_urn
+            type: string
+            required: true
+          - name: configured_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_payor_configure_permissions
+        affected_aggregate_id: agg_permission_self_service
+
+    business_rules:
+      - rule_id: rle_payor_permission_scoped_to_profile
+        text: "Payor permission policies scoped to payor's indirect client profile - cannot grant permissions to users outside profile"
+        applies_to:
+          - cmd_payor_configure_permissions
+
+  # Story 19: Payor Self-Service Approval Rule Configuration
+  - domain_story_id: dst_payor_self_service_approval_config
+    title: "Payor Configures Approval Rules via Self-Service Portal"
+    description: |
+      A business payor administrator uses the self-service portal to configure approval rules for
+      receivable invoice workflows. The payor sets approval thresholds (amount-based), approver
+      count (single or multiple), and approver identities. For invoices below threshold, single
+      approver is required. For invoices above threshold, multiple approvers are required (parallel
+      approval - all must approve). MVP supports ONLY parallel approval (no sequential approval).
+      Each of 700 business payors configures their own approval rules independently, with total
+      target of 700 approval rules configured across all payors.
+    tags:
+      - self_service_portal
+      - approval_management
+      - mvp
+      - priority_mvp
+
+    aggregates:
+      - aggregate_id: agg_approval_self_service
+        name: "ApprovalSelfService"
+        description: "Self-service approval rule management aggregate enabling payors to configure approval workflows"
+        invariants:
+          - "Approval rules scoped to payor's indirect client profile"
+          - "Parallel approval only in MVP - all required approvers must approve"
+
+    commands:
+      - command_id: cmd_payor_configure_approval_rule
+        name: "PayorConfigureApprovalRule"
+        description: "Payor configures approval rule with threshold and approver count via self-service portal"
+        actor_ids:
+          - act_payor_portal_user
+        target_aggregate_id: agg_approval_self_service
+        parameters:
+          - name: indirect_client_profile_id
+            type: uuid
+            required: true
+          - name: threshold_amount
+            type: money
+            required: true
+            description: "Amount threshold determining single vs multiple approvers"
+          - name: approver_count
+            type: integer
+            required: true
+            description: "Number of approvers required (1 for single, N for multiple)"
+          - name: approver_user_ids
+            type: json
+            required: true
+            description: "List of user IDs who can approve (must have >= approver_count users)"
+        emits_events:
+          - evt_payor_approval_rule_configured
+
+    events:
+      - event_id: evt_payor_approval_rule_configured
+        name: "PayorApprovalRuleConfigured"
+        description: "Payor has configured approval rule for receivable invoice workflows via self-service portal"
+        tense: past
+        payload:
+          - name: rule_id
+            type: uuid
+            required: true
+          - name: indirect_client_profile_id
+            type: uuid
+            required: true
+          - name: threshold_amount
+            type: money
+            required: true
+          - name: approver_count
+            type: integer
+            required: true
+          - name: configured_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_payor_configure_approval_rule
+        affected_aggregate_id: agg_approval_self_service
+
+    business_rules:
+      - rule_id: rle_parallel_approval_only_in_mvp
+        text: "MVP supports parallel approval only (no sequential approval) - all required approvers must approve"
+        applies_to:
+          - cmd_payor_configure_approval_rule
+
+      - rule_id: rle_threshold_determines_approver_count
+        text: "Amount threshold determines single vs multiple approver requirement - below threshold = single, above = multiple"
+        applies_to:
+          - cmd_payor_configure_approval_rule
+
+      - rule_id: rle_approver_list_sufficient
+        text: "Approver user list must contain at least approver_count users to satisfy approval requirement"
+        applies_to:
+          - cmd_payor_configure_approval_rule
+
+      - rule_id: rle_mvp_700_approval_rules_target
+        text: "MVP targets 700 approval rules configured across 700 business payors (1 rule per payor average)"
+        applies_to:
+          - cmd_payor_configure_approval_rule
+
+  # ================================================================================================
+  # MVP PRIORITY: OKTA INTEGRATION LIFECYCLES (3 stories)
+  # ================================================================================================
+
+  # Story 20: Okta User Lifecycle - Create
+  - domain_story_id: dst_okta_user_lifecycle_create
+    title: "Platform Creates Indirect Client User in Okta"
+    description: |
+      The platform creates a new indirect client user in Okta via API integration. This occurs
+      when a payor administrator creates a user via self-service portal, or when a bank employee
+      onboards a payor with initial users via employee portal. The platform sends user profile
+      data to Okta, receives confirmation with Okta user ID, and updates platform user record
+      with Okta linking. Provisioning must complete within 2 seconds. Platform owns full lifecycle
+      management for 1050 indirect client users across 700 business payors in MVP.
+    tags:
+      - okta_integration
+      - user_lifecycle
+      - mvp
+      - priority_mvp
+
+    aggregates:
+      - aggregate_id: agg_okta_user_lifecycle
+        name: "OktaUserLifecycle"
+        description: "Okta user lifecycle management aggregate handling create, update, activate, deactivate, lock, unlock operations"
+        invariants:
+          - "Okta user ID must be stored after successful creation"
+          - "User provisioning must complete within 2 seconds"
+
+    domain_services:
+      - domain_service_id: svc_dom_okta_integration
+        name: "OktaIntegrationDomainService"
+        description: "Domain service for Okta API operations (create, update, activate, deactivate, lock, unlock users)"
+        stateless: true
+        operations:
+          - name: create_user_in_okta
+            parameters:
+              - name: user_profile
+                type: json
+                required: true
+            return_type: string
+            description: "Returns Okta user ID"
+          - name: update_user_in_okta
+            parameters:
+              - name: okta_user_id
+                type: string
+                required: true
+              - name: profile_updates
+                type: json
+                required: true
+            return_type: void
+          - name: activate_user_in_okta
+            parameters:
+              - name: okta_user_id
+                type: string
+                required: true
+            return_type: void
+          - name: deactivate_user_in_okta
+            parameters:
+              - name: okta_user_id
+                type: string
+                required: true
+            return_type: void
+          - name: lock_user_in_okta
+            parameters:
+              - name: okta_user_id
+                type: string
+                required: true
+            return_type: void
+          - name: unlock_user_in_okta
+            parameters:
+              - name: okta_user_id
+                type: string
+                required: true
+            return_type: void
+
+    commands:
+      - command_id: cmd_create_okta_user
+        name: "CreateOktaUser"
+        description: "Creates user in Okta via API integration with <2 second latency"
+        actor_ids:
+          - act_okta_system
+        target_aggregate_id: agg_okta_user_lifecycle
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+          - name: email
+            type: string
+            required: true
+          - name: user_profile
+            type: json
+            required: true
+        invokes_domain_services:
+          - svc_dom_okta_integration
+        emits_events:
+          - evt_okta_user_created
+
+      - command_id: cmd_update_okta_user
+        name: "UpdateOktaUser"
+        description: "Updates user profile in Okta via API integration"
+        actor_ids:
+          - act_okta_system
+        target_aggregate_id: agg_okta_user_lifecycle
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+          - name: profile_updates
+            type: json
+            required: true
+        invokes_domain_services:
+          - svc_dom_okta_integration
+        emits_events:
+          - evt_okta_user_updated
+
+      - command_id: cmd_activate_okta_user
+        name: "ActivateOktaUser"
+        description: "Activates user in Okta via API integration"
+        actor_ids:
+          - act_okta_system
+        target_aggregate_id: agg_okta_user_lifecycle
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+        invokes_domain_services:
+          - svc_dom_okta_integration
+        emits_events:
+          - evt_okta_user_activated
+
+    events:
+      - event_id: evt_okta_user_created
+        name: "OktaUserCreated"
+        description: "User has been successfully created in Okta via platform API integration"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+          - name: logon_id
+            type: string
+            required: true
+          - name: created_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_create_okta_user
+        affected_aggregate_id: agg_okta_user_lifecycle
+        policies_triggered:
+          - pol_update_user_with_okta_id
+
+      - event_id: evt_okta_user_updated
+        name: "OktaUserUpdated"
+        description: "User profile has been successfully updated in Okta"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+          - name: updated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_update_okta_user
+        affected_aggregate_id: agg_okta_user_lifecycle
+
+      - event_id: evt_okta_user_activated
+        name: "OktaUserActivated"
+        description: "User has been successfully activated in Okta"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+          - name: activated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_activate_okta_user
+        affected_aggregate_id: agg_okta_user_lifecycle
+
+    policies:
+      - policy_id: pol_update_user_with_okta_id
+        name: "Update Platform User with Okta ID After Creation"
+        description: "When user is created in Okta, update platform user record with Okta user ID for lifecycle linking"
+        when_event_id: evt_okta_user_created
+        issues_command_id: cmd_link_user_to_okta
+
+    business_rules:
+      - rule_id: rle_okta_user_id_required
+        text: "Platform user record must store Okta user ID after successful creation for lifecycle management"
+        applies_to:
+          - cmd_create_okta_user
+
+      - rule_id: rle_mvp_1050_users_target
+        text: "MVP targets creating 1050 indirect client users in Okta across 700 business payors"
+        applies_to:
+          - cmd_create_okta_user
+
+  # Story 21: Okta User Lifecycle - Deactivate
+  - domain_story_id: dst_okta_user_lifecycle_deactivate
+    title: "Platform Deactivates Indirect Client User in Okta"
+    description: |
+      The platform deactivates an indirect client user in Okta via API integration. This occurs
+      when a payor administrator deactivates a user via self-service portal, or when a bank
+      employee deactivates a user via employee portal. Deactivation prevents user from authenticating
+      to self-service portal but preserves user profile for potential reactivation. Platform sends
+      deactivation request to Okta, receives confirmation, and updates platform user status.
+    tags:
+      - okta_integration
+      - user_lifecycle
+      - mvp
+      - priority_mvp
+
+    commands:
+      - command_id: cmd_deactivate_okta_user
+        name: "DeactivateOktaUser"
+        description: "Deactivates user in Okta via API integration"
+        actor_ids:
+          - act_okta_system
+        target_aggregate_id: agg_okta_user_lifecycle
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+        invokes_domain_services:
+          - svc_dom_okta_integration
+        emits_events:
+          - evt_okta_user_deactivated
+
+    events:
+      - event_id: evt_okta_user_deactivated
+        name: "OktaUserDeactivated"
+        description: "User has been successfully deactivated in Okta"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+          - name: deactivated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_deactivate_okta_user
+        affected_aggregate_id: agg_okta_user_lifecycle
+
+  # Story 22: Okta User Lifecycle - Lock/Unlock
+  - domain_story_id: dst_okta_user_lifecycle_lock_unlock
+    title: "Platform Locks and Unlocks Indirect Client Users in Okta"
+    description: |
+      The platform locks and unlocks indirect client users in Okta via API integration. Lock
+      operations occur when security issues are detected or when payor administrators temporarily
+      suspend access. Unlock operations restore access after security clearance or administrator
+      authorization. Platform sends lock/unlock requests to Okta, receives confirmation, and
+      updates platform user status accordingly.
+    tags:
+      - okta_integration
+      - user_lifecycle
+      - security
+      - mvp
+      - priority_mvp
+
+    commands:
+      - command_id: cmd_lock_okta_user
+        name: "LockOktaUser"
+        description: "Locks user in Okta due to security concern or administrator action"
+        actor_ids:
+          - act_okta_system
+        target_aggregate_id: agg_okta_user_lifecycle
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+          - name: lock_reason
+            type: string
+            required: true
+        invokes_domain_services:
+          - svc_dom_okta_integration
+        emits_events:
+          - evt_okta_user_locked
+
+      - command_id: cmd_unlock_okta_user
+        name: "UnlockOktaUser"
+        description: "Unlocks user in Okta after security clearance or administrator authorization"
+        actor_ids:
+          - act_okta_system
+        target_aggregate_id: agg_okta_user_lifecycle
+        parameters:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+        invokes_domain_services:
+          - svc_dom_okta_integration
+        emits_events:
+          - evt_okta_user_unlocked
+
+    events:
+      - event_id: evt_okta_user_locked
+        name: "OktaUserLocked"
+        description: "User has been successfully locked in Okta"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+          - name: locked_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_lock_okta_user
+        affected_aggregate_id: agg_okta_user_lifecycle
+
+      - event_id: evt_okta_user_unlocked
+        name: "OktaUserUnlocked"
+        description: "User has been successfully unlocked in Okta"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: okta_user_id
+            type: string
+            required: true
+          - name: unlocked_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_unlock_okta_user
+        affected_aggregate_id: agg_okta_user_lifecycle
+
+  # ================================================================================================
+  # MVP PRIORITY: EXPRESS INTEGRATION STORIES (3 stories)
+  # ================================================================================================
+
+  # Story 23: Express User Sync - Add Event
+  - domain_story_id: dst_express_user_sync_add
+    title: "Platform Consumes User Add Event from Express via Anti-Corruption Layer"
+    description: |
+      The platform consumes user add event from legacy Express system via event streaming
+      integration (anti-corruption layer pattern). When Express publishes user add event (direct
+      client user created in Express self-service), platform receives event, validates payload,
+      translates Express user model to platform domain model, and creates replicated user record.
+      Site-id serves as linking key between platform online profile and Express profile. User
+      replication must complete within 5 minutes from Express event publication. Platform
+      replicates direct client users for permission/approval enforcement but does NOT manage
+      their lifecycle (Express owns lifecycle with A-and-P authentication).
+    tags:
+      - express_integration
+      - anti_corruption_layer
+      - user_replication
+      - mvp
+      - priority_mvp
+
+    actors:
+      - actor_id: act_express_system
+        name: "Express System"
+        kind: system
+        description: "Legacy Express platform managing direct client users with A-and-P authentication and publishing user events"
+
+    work_objects:
+      - work_object_id: wobj_express_user_event
+        name: "Express User Event"
+        description: "User event from Express system (add or update) requiring translation to domain model"
+        aggregate_id: agg_express_acl
+        attributes:
+          - name: event_id
+            type: string
+            required: true
+          - name: event_type
+            type: enum
+            required: true
+            description: "user_add or user_update"
+          - name: site_id
+            type: string
+            required: true
+            description: "Linking key to platform online profile"
+          - name: express_user_payload
+            type: json
+            required: true
+            description: "Express user model (big ball of mud)"
+          - name: received_at
+            type: datetime
+            required: true
+
+    aggregates:
+      - aggregate_id: agg_express_acl
+        name: "ExpressACL"
+        description: "Anti-corruption layer aggregate translating Express user model to platform domain model"
+        root_work_object_id: wobj_express_user_event
+        work_object_ids:
+          - wobj_express_user_event
+        invariants:
+          - "Site-id must map to valid online profile in platform"
+          - "Express user model must be translated without polluting platform domain"
+
+      - aggregate_id: agg_replicated_user
+        name: "ReplicatedUser"
+        description: "Replicated direct client user from Express for permission/approval enforcement (Express owns lifecycle)"
+        invariants:
+          - "Replicated user references Express user via site-id and Express user ID"
+          - "Platform does NOT modify replicated user lifecycle (read-only for platform, write-only for Express)"
+
+    application_services:
+      - app_service_id: svc_app_event_stream_processor
+        name: "EventStreamProcessorApplicationService"
+        description: "Application service processing Express user events from event stream"
+        commands_handled:
+          - cmd_consume_express_user_add_event
+          - cmd_consume_express_user_update_event
+
+    commands:
+      - command_id: cmd_consume_express_user_add_event
+        name: "ConsumeExpressUserAddEvent"
+        description: "Consumes user add event from Express event stream and replicates user to platform"
+        actor_ids:
+          - act_express_system
+        target_aggregate_id: agg_express_acl
+        parameters:
+          - name: event_id
+            type: string
+            required: true
+          - name: site_id
+            type: string
+            required: true
+          - name: express_user_payload
+            type: json
+            required: true
+        invokes_app_services:
+          - svc_app_event_stream_processor
+        emits_events:
+          - evt_express_user_add_event_received
+          - evt_express_user_replicated
+
+      - command_id: cmd_translate_express_user_model
+        name: "TranslateExpressUserModel"
+        description: "Translates Express user model (big ball of mud) to platform domain model via anti-corruption layer"
+        actor_ids:
+          - act_express_system
+        target_aggregate_id: agg_express_acl
+        parameters:
+          - name: express_user_payload
+            type: json
+            required: true
+        emits_events:
+          - evt_express_user_model_translated
+
+    events:
+      - event_id: evt_express_user_add_event_received
+        name: "ExpressUserAddEventReceived"
+        description: "User add event has been received from Express event stream"
+        tense: past
+        payload:
+          - name: event_id
+            type: string
+            required: true
+          - name: site_id
+            type: string
+            required: true
+          - name: received_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_consume_express_user_add_event
+        affected_aggregate_id: agg_express_acl
+        policies_triggered:
+          - pol_replicate_express_user_on_add_event
+
+      - event_id: evt_express_user_replicated
+        name: "ExpressUserReplicated"
+        description: "Direct client user has been replicated from Express to platform domain"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: site_id
+            type: string
+            required: true
+          - name: express_user_id
+            type: string
+            required: true
+          - name: replicated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_consume_express_user_add_event
+        affected_aggregate_id: agg_replicated_user
+
+      - event_id: evt_express_user_model_translated
+        name: "ExpressUserModelTranslated"
+        description: "Express user model has been translated to platform domain model via anti-corruption layer"
+        tense: past
+        payload:
+          - name: express_user_id
+            type: string
+            required: true
+          - name: platform_user_model
+            type: json
+            required: true
+          - name: translated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_translate_express_user_model
+        affected_aggregate_id: agg_express_acl
+
+    policies:
+      - policy_id: pol_replicate_express_user_on_add_event
+        name: "Replicate Express User on Add Event Received"
+        description: "When Express user add event is received, translate model and create replicated user in platform domain"
+        when_event_id: evt_express_user_add_event_received
+        issues_command_id: cmd_translate_express_user_model
+
+    business_rules:
+      - rule_id: rle_anp_for_direct_clients_via_express
+        text: "Direct client users use A-and-P authentication via Express (not Okta)"
+        applies_to:
+          - cmd_consume_express_user_add_event
+
+      - rule_id: rle_express_owns_direct_user_lifecycle
+        text: "Express fully manages direct client user lifecycle in A-and-P - platform replicates for permission/approval enforcement only"
+        applies_to:
+          - cmd_consume_express_user_add_event
+
+      - rule_id: rle_express_sync_within_5_minutes
+        text: "Express user replication must complete within 5 minutes from event publication"
+        applies_to:
+          - cmd_consume_express_user_add_event
+
+      - rule_id: rle_site_id_linking_key
+        text: "Site-id serves as linking key between platform online profile and Express profile for user synchronization"
+        applies_to:
+          - cmd_consume_express_user_add_event
+
+  # Story 24: Express User Sync - Update Event
+  - domain_story_id: dst_express_user_sync_update
+    title: "Platform Consumes User Update Event from Express via Anti-Corruption Layer"
+    description: |
+      The platform consumes user update event from legacy Express system via event streaming
+      integration. When Express publishes user update event (direct client user modified in
+      Express self-service), platform receives event, validates payload, translates Express
+      user model to platform domain model, and updates replicated user record. Platform maintains
+      consistency with Express user state for permission/approval enforcement while Express
+      continues to own user lifecycle with A-and-P authentication.
+    tags:
+      - express_integration
+      - anti_corruption_layer
+      - user_replication
+      - mvp
+      - priority_mvp
+
+    commands:
+      - command_id: cmd_consume_express_user_update_event
+        name: "ConsumeExpressUserUpdateEvent"
+        description: "Consumes user update event from Express event stream and updates replicated user in platform"
+        actor_ids:
+          - act_express_system
+        target_aggregate_id: agg_express_acl
+        parameters:
+          - name: event_id
+            type: string
+            required: true
+          - name: site_id
+            type: string
+            required: true
+          - name: express_user_id
+            type: string
+            required: true
+          - name: express_user_payload
+            type: json
+            required: true
+        invokes_app_services:
+          - svc_app_event_stream_processor
+        emits_events:
+          - evt_express_user_update_event_received
+          - evt_replicated_user_updated
+
+    events:
+      - event_id: evt_express_user_update_event_received
+        name: "ExpressUserUpdateEventReceived"
+        description: "User update event has been received from Express event stream"
+        tense: past
+        payload:
+          - name: event_id
+            type: string
+            required: true
+          - name: site_id
+            type: string
+            required: true
+          - name: express_user_id
+            type: string
+            required: true
+          - name: received_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_consume_express_user_update_event
+        affected_aggregate_id: agg_express_acl
+        policies_triggered:
+          - pol_update_replicated_user_on_express_update
+
+      - event_id: evt_replicated_user_updated
+        name: "ReplicatedUserUpdated"
+        description: "Replicated direct client user has been updated from Express event"
+        tense: past
+        payload:
+          - name: user_id
+            type: uuid
+            required: true
+          - name: express_user_id
+            type: string
+            required: true
+          - name: updated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_consume_express_user_update_event
+        affected_aggregate_id: agg_replicated_user
+
+    policies:
+      - policy_id: pol_update_replicated_user_on_express_update
+        name: "Update Replicated User on Express Update Event Received"
+        description: "When Express user update event is received, translate model and update replicated user in platform domain"
+        when_event_id: evt_express_user_update_event_received
+        issues_command_id: cmd_translate_express_user_model
+
+  # Story 25: Express ACL Translation
+  - domain_story_id: dst_express_acl_translation
+    title: "Anti-Corruption Layer Translates Express User Model to Platform Domain Model"
+    description: |
+      The anti-corruption layer translates Express user model (big ball of mud with legacy data
+      structures) to clean platform domain model. Translation extracts relevant user attributes
+      (logon ID, email, user role, status), maps Express-specific fields to domain concepts,
+      and validates data quality. This protects platform domain from Express complexity and
+      enables eventual migration to Okta for direct client users (post-MVP) without polluting
+      domain model with Express-specific concerns.
+    tags:
+      - express_integration
+      - anti_corruption_layer
+      - domain_translation
+      - mvp
+      - priority_mvp
+
+    domain_services:
+      - domain_service_id: svc_dom_express_translation
+        name: "ExpressTranslationDomainService"
+        description: "Domain service translating Express user model to platform domain model"
+        stateless: true
+        operations:
+          - name: translate_express_user_to_domain
+            parameters:
+              - name: express_user_payload
+                type: json
+                required: true
+            return_type: json
+            description: "Returns platform domain user model"
+
+    business_rules:
+      - rule_id: rle_acl_protects_domain_from_express
+        text: "Anti-corruption layer must translate Express model without polluting platform domain with Express-specific concerns"
+        applies_to:
+          - cmd_translate_express_user_model
+
+  # ================================================================================================
+  # MVP PRIORITY: APPROVAL WORKFLOW STORIES (5 stories)
+  # ================================================================================================
+
+  # Story 26: Approval Workflow - Submit Invoice
+  - domain_story_id: dst_approval_workflow_submit
+    title: "Payor Submits Invoice for Approval via Receivable-Approval Service"
+    description: |
+      A business payor user submits an invoice for approval via receivable-approval service in
+      self-service portal. The platform creates approval workflow instance based on payor's
+      configured approval rules. If invoice amount is below threshold, single approver workflow
+      is created. If invoice amount is above threshold, multiple approver workflow is created
+      with parallel approval requirement (all required approvers must approve). Workflow enters
+      pending state awaiting approver decisions. Average approval processing time target is
+      <24 hours.
+    tags:
+      - approval_workflow
+      - receivable_service
+      - mvp
+      - priority_mvp
+
+    work_objects:
+      - work_object_id: wobj_approval_request
+        name: "Approval Request"
+        description: "Invoice requiring approval based on payor's configured rules"
+        aggregate_id: agg_approval_workflow_instance
+        attributes:
+          - name: request_id
+            type: uuid
+            required: true
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: payor_indirect_client_id
+            type: uuid
+            required: true
+          - name: invoice_amount
+            type: money
+            required: true
+          - name: submitted_by_user_id
+            type: uuid
+            required: true
+          - name: workflow_status
+            type: enum
+            required: true
+            description: "pending, approved, rejected, expired"
+
+    aggregates:
+      - aggregate_id: agg_approval_workflow_instance
+        name: "ApprovalWorkflowInstance"
+        description: "Specific approval workflow instance for invoice with configured rules and approver decisions"
+        root_work_object_id: wobj_approval_request
+        work_object_ids:
+          - wobj_approval_request
+        invariants:
+          - "Workflow must reference valid approval rule configured by payor"
+          - "Parallel approval: all required approvers must approve for workflow to complete"
+
+    commands:
+      - command_id: cmd_submit_invoice_for_approval
+        name: "SubmitInvoiceForApproval"
+        description: "Submits invoice for approval, creates workflow instance based on payor's approval rules"
+        actor_ids:
+          - act_payor_portal_user
+        target_aggregate_id: agg_approval_workflow_instance
+        parameters:
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: payor_indirect_client_id
+            type: uuid
+            required: true
+          - name: invoice_amount
+            type: money
+            required: true
+        emits_events:
+          - evt_invoice_submitted_for_approval
+          - evt_approval_workflow_created
+
+    events:
+      - event_id: evt_invoice_submitted_for_approval
+        name: "InvoiceSubmittedForApproval"
+        description: "Invoice has been submitted for approval via receivable-approval service"
+        tense: past
+        payload:
+          - name: request_id
+            type: uuid
+            required: true
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: payor_indirect_client_id
+            type: uuid
+            required: true
+          - name: invoice_amount
+            type: money
+            required: true
+          - name: submitted_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_submit_invoice_for_approval
+        affected_aggregate_id: agg_approval_workflow_instance
+        policies_triggered:
+          - pol_create_approval_workflow_on_submission
+
+      - event_id: evt_approval_workflow_created
+        name: "ApprovalWorkflowCreated"
+        description: "Approval workflow instance has been created based on payor's configured rules"
+        tense: past
+        payload:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: approval_rule_id
+            type: uuid
+            required: true
+          - name: required_approver_count
+            type: integer
+            required: true
+          - name: created_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_submit_invoice_for_approval
+        affected_aggregate_id: agg_approval_workflow_instance
+
+    policies:
+      - policy_id: pol_create_approval_workflow_on_submission
+        name: "Create Approval Workflow on Invoice Submission"
+        description: "When invoice is submitted, create approval workflow instance based on payor's configured approval rules"
+        when_event_id: evt_invoice_submitted_for_approval
+        issues_command_id: cmd_create_workflow_instance
+
+    business_rules:
+      - rule_id: rle_approval_workflow_within_24_hours
+        text: "Average approval workflow processing time must be <24 hours from submission to completion"
+        applies_to:
+          - cmd_submit_invoice_for_approval
+
+  # Story 27: Approval Workflow - Single Approve
+  - domain_story_id: dst_approval_workflow_single_approve
+    title: "Single Approver Approves Invoice Below Threshold"
+    description: |
+      A business payor approver approves an invoice via receivable-approval service where invoice
+      amount is below configured threshold (single approver required). The approver views invoice
+      details, makes approval decision, and workflow completes immediately upon single approval.
+      Invoice proceeds to payment processing. This represents the simple approval path for
+      lower-value invoices.
+    tags:
+      - approval_workflow
+      - receivable_service
+      - mvp
+      - priority_mvp
+
+    commands:
+      - command_id: cmd_approve_invoice
+        name: "ApproveInvoice"
+        description: "Approver approves invoice in approval workflow"
+        actor_ids:
+          - act_payor_portal_user
+        target_aggregate_id: agg_approval_workflow_instance
+        parameters:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: approver_user_id
+            type: uuid
+            required: true
+          - name: approval_decision
+            type: enum
+            required: true
+            description: "approve"
+        emits_events:
+          - evt_invoice_approved
+          - evt_approval_workflow_completed
+
+    events:
+      - event_id: evt_invoice_approved
+        name: "InvoiceApproved"
+        description: "Invoice has been approved by approver in workflow"
+        tense: past
+        payload:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: approver_user_id
+            type: uuid
+            required: true
+          - name: approved_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_approve_invoice
+        affected_aggregate_id: agg_approval_workflow_instance
+        policies_triggered:
+          - pol_complete_workflow_on_single_approval
+
+      - event_id: evt_approval_workflow_completed
+        name: "ApprovalWorkflowCompleted"
+        description: "Approval workflow has completed successfully (all required approvals received)"
+        tense: past
+        payload:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: completed_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_approve_invoice
+        affected_aggregate_id: agg_approval_workflow_instance
+        policies_triggered:
+          - pol_process_payment_on_workflow_complete
+
+    policies:
+      - policy_id: pol_complete_workflow_on_single_approval
+        name: "Complete Workflow on Single Approval for Below-Threshold Invoices"
+        description: "When single approver approves invoice below threshold, workflow completes immediately"
+        when_event_id: evt_invoice_approved
+        issues_command_id: cmd_complete_workflow
+
+      - policy_id: pol_process_payment_on_workflow_complete
+        name: "Process Payment on Workflow Completion"
+        description: "When approval workflow completes, trigger invoice payment processing"
+        when_event_id: evt_approval_workflow_completed
+        issues_command_id: cmd_process_invoice_payment
+
+  # Story 28: Approval Workflow - Parallel Approve
+  - domain_story_id: dst_approval_workflow_parallel_approve
+    title: "Multiple Approvers Approve Invoice Above Threshold (Parallel Approval)"
+    description: |
+      Multiple business payor approvers approve an invoice via receivable-approval service where
+      invoice amount is above configured threshold (multiple approvers required). Each approver
+      independently views invoice details and makes approval decision. Workflow requires ALL
+      required approvers to approve (parallel approval - no sequential). When all approvers
+      have approved, workflow completes and invoice proceeds to payment processing. This
+      represents the complex approval path for higher-value invoices. MVP supports ONLY parallel
+      approval (no sequential approval).
+    tags:
+      - approval_workflow
+      - receivable_service
+      - parallel_approval
+      - mvp
+      - priority_mvp
+
+    events:
+      - event_id: evt_all_approvers_approved
+        name: "AllApproversApproved"
+        description: "All required approvers have approved invoice in parallel approval workflow"
+        tense: past
+        payload:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: approver_count
+            type: integer
+            required: true
+          - name: all_approved_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_approve_invoice
+        affected_aggregate_id: agg_approval_workflow_instance
+        policies_triggered:
+          - pol_complete_workflow_on_all_approvals
+
+    policies:
+      - policy_id: pol_complete_workflow_on_all_approvals
+        name: "Complete Workflow When All Required Approvers Have Approved"
+        description: "When all required approvers have approved invoice (parallel approval), workflow completes and triggers payment processing"
+        when_event_id: evt_all_approvers_approved
+        issues_command_id: cmd_complete_workflow
+
+    business_rules:
+      - rule_id: rle_all_approvers_must_approve
+        text: "Parallel approval requires ALL required approvers to approve - workflow cannot complete with partial approvals"
+        applies_to:
+          - cmd_approve_invoice
+
+  # Story 29: Approval Workflow - Reject
+  - domain_story_id: dst_approval_workflow_reject
+    title: "Approver Rejects Invoice in Approval Workflow"
+    description: |
+      A business payor approver rejects an invoice via receivable-approval service. The approver
+      views invoice details, determines invoice is invalid or incorrect, and makes rejection
+      decision with reason. Workflow terminates immediately upon rejection (single rejection
+      terminates workflow regardless of approval rule). Invoice returns to submitter for
+      correction or cancellation. No payment processing occurs for rejected invoices.
+    tags:
+      - approval_workflow
+      - receivable_service
+      - mvp
+      - priority_mvp
+
+    commands:
+      - command_id: cmd_reject_invoice
+        name: "RejectInvoice"
+        description: "Approver rejects invoice in approval workflow with reason"
+        actor_ids:
+          - act_payor_portal_user
+        target_aggregate_id: agg_approval_workflow_instance
+        parameters:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: approver_user_id
+            type: uuid
+            required: true
+          - name: rejection_reason
+            type: string
+            required: true
+        emits_events:
+          - evt_invoice_rejected
+          - evt_approval_workflow_terminated
+
+    events:
+      - event_id: evt_invoice_rejected
+        name: "InvoiceRejected"
+        description: "Invoice has been rejected by approver with reason"
+        tense: past
+        payload:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: approver_user_id
+            type: uuid
+            required: true
+          - name: rejection_reason
+            type: string
+            required: true
+          - name: rejected_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_reject_invoice
+        affected_aggregate_id: agg_approval_workflow_instance
+        policies_triggered:
+          - pol_terminate_workflow_on_rejection
+
+      - event_id: evt_approval_workflow_terminated
+        name: "ApprovalWorkflowTerminated"
+        description: "Approval workflow has been terminated due to rejection"
+        tense: past
+        payload:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: termination_reason
+            type: string
+            required: true
+          - name: terminated_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_reject_invoice
+        affected_aggregate_id: agg_approval_workflow_instance
+        policies_triggered:
+          - pol_notify_submitter_on_rejection
+
+    policies:
+      - policy_id: pol_terminate_workflow_on_rejection
+        name: "Terminate Workflow Immediately on Invoice Rejection"
+        description: "When approver rejects invoice, workflow terminates immediately regardless of approval rule"
+        when_event_id: evt_invoice_rejected
+        issues_command_id: cmd_terminate_workflow
+
+      - policy_id: pol_notify_submitter_on_rejection
+        name: "Notify Submitter on Invoice Rejection"
+        description: "When workflow is terminated due to rejection, notify submitter with rejection reason"
+        when_event_id: evt_approval_workflow_terminated
+        issues_command_id: cmd_send_rejection_notification
+
+    business_rules:
+      - rule_id: rle_single_rejection_terminates_workflow
+        text: "Single rejection terminates approval workflow immediately regardless of approval rule or approver count"
+        applies_to:
+          - cmd_reject_invoice
+
+  # Story 30: Approval Workflow - Expire
+  - domain_story_id: dst_approval_workflow_expire
+    title: "Approval Workflow Expires Due to Timeout"
+    description: |
+      An approval workflow expires when approvers fail to make decisions within configured
+      timeout period. The platform monitors pending workflows, detects timeout condition,
+      and expires workflow automatically. Invoice returns to submitter for resubmission.
+      Workflow expiration prevents indefinite pending state and enforces timely decision-making
+      for receivable invoice approvals.
+    tags:
+      - approval_workflow
+      - receivable_service
+      - mvp
+      - priority_mvp
+
+    commands:
+      - command_id: cmd_expire_approval_workflow
+        name: "ExpireApprovalWorkflow"
+        description: "Expires approval workflow due to timeout without approver decisions"
+        actor_ids:
+          - act_okta_system
+        target_aggregate_id: agg_approval_workflow_instance
+        parameters:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: timeout_period_hours
+            type: integer
+            required: true
+        emits_events:
+          - evt_approval_workflow_expired
+
+    events:
+      - event_id: evt_approval_workflow_expired
+        name: "ApprovalWorkflowExpired"
+        description: "Approval workflow has expired due to timeout without approver decisions"
+        tense: past
+        payload:
+          - name: workflow_instance_id
+            type: uuid
+            required: true
+          - name: invoice_id
+            type: uuid
+            required: true
+          - name: timeout_period_hours
+            type: integer
+            required: true
+          - name: expired_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_expire_approval_workflow
+        affected_aggregate_id: agg_approval_workflow_instance
+        policies_triggered:
+          - pol_notify_submitter_on_expiration
+
+    policies:
+      - policy_id: pol_expire_workflow_on_timeout
+        name: "Expire Workflow When Timeout Period Exceeded"
+        description: "When approval workflow pending time exceeds timeout period, expire workflow automatically"
+        when_event_id: evt_approval_workflow_expired
+        issues_command_id: cmd_expire_approval_workflow
+
+      - policy_id: pol_notify_submitter_on_expiration
+        name: "Notify Submitter on Workflow Expiration"
+        description: "When workflow expires due to timeout, notify submitter for invoice resubmission"
+        when_event_id: evt_approval_workflow_expired
+        issues_command_id: cmd_send_expiration_notification
+
+  # ================================================================================================
+  # MVP PRIORITY: THREE-TIER RELATIONSHIP STORIES (3 stories)
+  # ================================================================================================
+
+  # Story 31: Three-Tier Relationship Setup
+  - domain_story_id: dst_three_tier_relationship_setup
+    title: "Platform Establishes Three-Tier Bank → Client → Payors Relationships"
+    description: |
+      The platform establishes three-tier relationships: Bank → Direct Client (large Canadian
+      commercial client) → Indirect Clients (700 business payors). This relationship model
+      enables large client to extend receivables services to their business partners (payors)
+      while bank maintains oversight and governance. Platform tracks relationship hierarchy,
+      manages permissions scoped to relationship tiers, and enforces relationship-specific
+      business rules. This three-tier model is the foundation for MVP's new business model
+      where clients can offer services to their partners.
+    tags:
+      - three_tier_relationship
+      - relationship_management
+      - mvp
+      - priority_mvp
+
+    aggregates:
+      - aggregate_id: agg_bank_client_relationship
+        name: "BankClientRelationship"
+        description: "Bank-to-direct-client relationship aggregate with governance and oversight"
+        invariants:
+          - "Bank retains ultimate governance and security authority over all tiers"
+          - "Direct client can only manage indirect clients within their relationship scope"
+
+      - aggregate_id: agg_client_payor_relationship
+        name: "ClientPayorRelationship"
+        description: "Direct-client-to-indirect-client (payor) relationship aggregate"
+        invariants:
+          - "Payor can only access services extended by their parent direct client"
+          - "Payor permissions scoped to relationship with parent client"
+
+      - aggregate_id: agg_three_tier_relationship
+        name: "ThreeTierRelationship"
+        description: "Complete three-tier Bank → Client → Payors relationship aggregate"
+        invariants:
+          - "MVP supports single primary client (no secondary client in MVP)"
+          - "Three-tier hierarchy: Bank → 1 Direct Client → 700 Indirect Clients (payors)"
+
+    commands:
+      - command_id: cmd_establish_bank_client_relationship
+        name: "EstablishBankClientRelationship"
+        description: "Establishes relationship between bank and large commercial client (tier 1 → tier 2)"
+        actor_ids:
+          - act_bank_employee_portal_user
+        target_aggregate_id: agg_bank_client_relationship
+        parameters:
+          - name: client_profile_id
+            type: uuid
+            required: true
+          - name: relationship_type
+            type: enum
+            required: true
+            description: "primary_client (MVP - no secondary client support)"
+        emits_events:
+          - evt_bank_client_relationship_established
+
+      - command_id: cmd_establish_client_payor_relationship
+        name: "EstablishClientPayorRelationship"
+        description: "Establishes relationship between direct client and indirect client payor (tier 2 → tier 3)"
+        actor_ids:
+          - act_bank_employee_portal_user
+        target_aggregate_id: agg_client_payor_relationship
+        parameters:
+          - name: parent_client_profile_id
+            type: uuid
+            required: true
+          - name: payor_indirect_client_id
+            type: uuid
+            required: true
+        emits_events:
+          - evt_client_payor_relationship_established
+
+    events:
+      - event_id: evt_bank_client_relationship_established
+        name: "BankClientRelationshipEstablished"
+        description: "Relationship between bank and direct client has been established (tier 1 → tier 2)"
+        tense: past
+        payload:
+          - name: relationship_id
+            type: uuid
+            required: true
+          - name: client_profile_id
+            type: uuid
+            required: true
+          - name: established_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_establish_bank_client_relationship
+        affected_aggregate_id: agg_bank_client_relationship
+
+      - event_id: evt_client_payor_relationship_established
+        name: "ClientPayorRelationshipEstablished"
+        description: "Relationship between direct client and indirect client payor has been established (tier 2 → tier 3)"
+        tense: past
+        payload:
+          - name: relationship_id
+            type: uuid
+            required: true
+          - name: parent_client_profile_id
+            type: uuid
+            required: true
+          - name: payor_indirect_client_id
+            type: uuid
+            required: true
+          - name: established_at
+            type: datetime
+            required: true
+        caused_by:
+          command_id: cmd_establish_client_payor_relationship
+        affected_aggregate_id: agg_client_payor_relationship
+
+    business_rules:
+      - rule_id: rle_three_tier_hierarchy_enforced
+        text: "Three-tier hierarchy must be maintained: Bank (tier 1) → Direct Client (tier 2) → Indirect Clients/Payors (tier 3)"
+        applies_to:
+          - cmd_establish_bank_client_relationship
+          - cmd_establish_client_payor_relationship
+
+      - rule_id: rle_mvp_one_direct_client
+        text: "MVP supports one large Canadian commercial direct client with 700 indirect client payors"
+        applies_to:
+          - cmd_establish_bank_client_relationship
+
+  # Story 32: Payor Business Onboarding
+  - domain_story_id: dst_payor_business_onboarding
+    title: "Platform Onboards Business Payor with Related Persons in Roles"
+    description: |
+      The platform onboards a business payor (indirect client) with related persons performing
+      various roles (signing officer, administrator, director). Each business payor has business
+      name, address, and one or more related persons. The same person can perform multiple roles
+      within the business. Related persons with administrator role can access self-service portal
+      to manage users, permissions, and approval rules for the business payor. This structure
+      supports the complex organizational hierarchies of business payors onboarded via employee
+      portal for MVP's 700 business payor target.
+    tags:
+      - payor_onboarding
+      - business_structure
+      - mvp
+      - priority_mvp
+
+    work_objects:
+      - work_object_id: wobj_related_person
+        name: "Related Person"
+        description: "Person associated with business payor performing one or more roles"
+        attributes:
+          - name: person_id
+            type: uuid
+            required: true
+          - name: person_name
+            type: string
+            required: true
+          - name: person_email
+            type: string
+            required: true
+          - name: roles
+            type: json
+            required: true
+            description: "Array of roles: signing_officer, administrator, director"
+
+    entities:
+      - entity_id: ent_related_person
+        name: "RelatedPerson"
+        description: "Person entity within business payor with role assignments"
+        aggregate_ref: agg_business_payor
+        is_aggregate_root: false
+        identity_field: person_id
+        identity_generation: auto_generated
+        attributes:
+          - name: person_id
+            type: uuid
+            required: true
+          - name: person_name
+            type: string
+            required: true
+          - name: person_email
+            type: string
+            required: true
+          - name: roles
+            type: json
+            required: true
+        business_methods:
+          - name: assign_role
+            parameters:
+              - name: role
+                type: enum
+                required: true
+            return_type: void
+          - name: remove_role
+            parameters:
+              - name: role
+                type: enum
+                required: true
+            return_type: void
+
+    business_rules:
+      - rule_id: rle_person_multiple_roles_allowed
+        text: "Same person can perform multiple roles within business payor (e.g., signing officer AND administrator)"
+        applies_to:
+          - cmd_assign_payor_role
+
+      - rule_id: rle_administrator_role_portal_access
+        text: "Related persons with administrator role can access self-service portal to manage users, permissions, and approval rules"
+        applies_to:
+          - cmd_onboard_business_payor
+
+  # Story 33: Related Person Role Assignment
+  - domain_story_id: dst_related_person_role_assignment
+    title: "Platform Assigns Roles to Related Persons in Business Payor"
+    description: |
+      The platform assigns roles to related persons within business payor: signing_officer,
+      administrator, or director. Role assignment determines person's access to self-service
+      portal and authorization for various business payor operations. Administrators can manage
+      users and approve invoices. Signing officers have authorization for legal documents.
+      Directors have oversight capabilities. Same person can hold multiple roles simultaneously
+      to support flexible business structures. Role assignments are managed via employee portal
+      during payor onboarding and can be updated as business relationships evolve.
+    tags:
+      - payor_onboarding
+      - role_management
+      - mvp
+      - priority_mvp
+
+    business_rules:
+      - rule_id: rle_signing_officer_role
+        text: "Signing officer role authorizes person for legal document signing and contract authorization"
+        applies_to:
+          - cmd_assign_payor_role
+
+      - rule_id: rle_administrator_role
+        text: "Administrator role grants self-service portal access for user management, permission configuration, and approval rule setup"
+        applies_to:
+          - cmd_assign_payor_role
+
+      - rule_id: rle_director_role
+        text: "Director role provides oversight capabilities and governance authority within business payor"
+        applies_to:
+          - cmd_assign_payor_role
