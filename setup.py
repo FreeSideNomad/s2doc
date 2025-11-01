@@ -23,7 +23,7 @@ setup(
     long_description_content_type="text/markdown",
     author="Igor Music",
     author_email="igor.music@example.com",
-    url="https://github.com/igormusic/domain-stories-visual",
+    url="https://github.com/FreeSideNomad/s2doc",
     packages=find_packages(exclude=['tests', 'tests.*']),
     python_requires=">=3.8",
     install_requires=[

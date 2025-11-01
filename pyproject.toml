@@ -43,10 +43,10 @@ dev = [
 s2doc = "s2doc.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/igormusic/domain-stories-visual"
-Documentation = "https://github.com/igormusic/domain-stories-visual#readme"
-Repository = "https://github.com/igormusic/domain-stories-visual"
-Issues = "https://github.com/igormusic/domain-stories-visual/issues"
+Homepage = "https://github.com/FreeSideNomad/s2doc"
+Documentation = "https://github.com/FreeSideNomad/s2doc#readme"
+Repository = "https://github.com/FreeSideNomad/s2doc"
+Issues = "https://github.com/FreeSideNomad/s2doc/issues"
 
 [tool.setuptools.dynamic]
 version = {attr = "s2doc.__version__.__version__"}

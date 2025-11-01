@@ -51,15 +51,15 @@ Detailed bounded context design with aggregates, entities, value objects, and se
 ### Method 1: Direct Installation from GitHub
 
 ```bash
-pip install git+https://github.com/igormusic/domain-stories-visual.git
+pip install git+https://github.com/FreeSideNomad/s2doc.git
 ```
 
 ### Method 2: Clone and Install
 
 ```bash
 # Clone the repository
-git clone https://github.com/igormusic/domain-stories-visual.git
-cd domain-stories-visual
+git clone https://github.com/FreeSideNomad/s2doc.git
+cd s2doc
 
 # Install in development mode (recommended for contributors)
 pip install -e .
@@ -72,10 +72,10 @@ pip install .
 
 ```bash
 # Install specific version tag
-pip install git+https://github.com/igormusic/domain-stories-visual.git@v1.0.0
+pip install git+https://github.com/FreeSideNomad/s2doc.git@v1.0.0
 
 # Install from specific branch
-pip install git+https://github.com/igormusic/domain-stories-visual.git@main
+pip install git+https://github.com/FreeSideNomad/s2doc.git@main
 ```
 
 ### Verify Installation
@@ -244,7 +244,7 @@ python3 -m pip show s2doc
 python3 -m s2doc.cli input.yaml
 
 # Or reinstall with user flag
-pip install --user git+https://github.com/igormusic/domain-stories-visual.git
+pip install --user git+https://github.com/FreeSideNomad/s2doc.git
 ```
 
 ### YAML parsing errors
@@ -296,8 +296,8 @@ Igor Music
 
 ## Links
 
-- **Repository**: https://github.com/igormusic/domain-stories-visual
-- **Issues**: https://github.com/igormusic/domain-stories-visual/issues
+- **Repository**: https://github.com/FreeSideNomad/s2doc
+- **Issues**: https://github.com/FreeSideNomad/s2doc/issues
 
 ## Version History
 
