@@ -1,0 +1,1628 @@
+bounded_context:
+  id: bc_payment_scheduling
+  name: "Payment Scheduling Context"
+  domain_ref: dom_payment_scheduling
+  description: "Core bounded context managing payment templates, schedules, recurring payment setup, and payment lifecycle within the payment scheduling domain"
+
+  value_objects:
+    - id: vo_payment_template_id
+      name: "PaymentTemplateId"
+      description: "Unique identifier for a payment template"
+      attributes:
+        - name: id
+          type: String
+          required: true
+          description: "UUID string representation"
+          validation: "Must be valid UUID format"
+      validation_rules:
+        - "Must be non-null and non-empty"
+        - "Must be valid UUID format"
+      equality_criteria:
+        - "id"
+      immutability: true
+
+    - id: vo_payment_id
+      name: "PaymentId"
+      description: "Unique identifier for a scheduled payment"
+      attributes:
+        - name: id
+          type: String
+          required: true
+          description: "UUID string representation"
+      validation_rules:
+        - "Must be valid UUID"
+      equality_criteria:
+        - "id"
+      immutability: true
+
+    - id: vo_schedule_id
+      name: "ScheduleId"
+      description: "Unique identifier for a payment schedule"
+      attributes:
+        - name: id
+          type: String
+          required: true
+      validation_rules:
+        - "Must be valid UUID"
+      equality_criteria:
+        - "id"
+      immutability: true
+
+    - id: vo_payment_group_id
+      name: "PaymentGroupId"
+      description: "Unique identifier for a payment group"
+      attributes:
+        - name: id
+          type: String
+          required: true
+      validation_rules:
+        - "Must be valid UUID"
+      equality_criteria:
+        - "id"
+      immutability: true
+
+    - id: vo_account_number
+      name: "AccountNumber"
+      description: "Bank account number with validation"
+      attributes:
+        - name: account_number
+          type: String
+          required: true
+          description: "Account number in standard format"
+      validation_rules:
+        - "Must be non-empty"
+        - "Must match valid account number pattern"
+        - "Must pass checksum validation"
+      equality_criteria:
+        - "account_number"
+      immutability: true
+
+    - id: vo_amount
+      name: "Amount"
+      description: "Monetary amount with currency"
+      attributes:
+        - name: value
+          type: BigDecimal
+          required: true
+          description: "Numerical amount"
+        - name: currency
+          type: String
+          required: true
+          description: "ISO 4217 currency code (CAD, USD, EUR, etc.)"
+        - name: scale
+          type: Integer
+          required: true
+          description: "Decimal places (typically 2)"
+      validation_rules:
+        - "Value must be positive or AVAILABLE_BALANCE keyword"
+        - "Currency must be valid ISO 4217 code"
+        - "Scale must be appropriate for currency (2 for CAD/USD)"
+      equality_criteria:
+        - "value"
+        - "currency"
+      immutability: true
+
+    - id: vo_payment_type
+      name: "PaymentType"
+      description: "Enumeration of supported payment types"
+      attributes:
+        - name: type
+          type: Enum
+          required: true
+          description: "ACCOUNT_TRANSFER, BILL_PAYMENT, ACH_CREDIT, ACH_DEBIT, INTERAC_SEND, WIRE"
+      validation_rules:
+        - "Must be one of the defined enum values"
+      equality_criteria:
+        - "type"
+      immutability: true
+
+    - id: vo_execution_date
+      name: "ExecutionDate"
+      description: "Date when payment should execute (must be working day)"
+      attributes:
+        - name: date
+          type: LocalDate
+          required: true
+      validation_rules:
+        - "Cannot be in the past"
+        - "Must be a valid working day for jurisdiction"
+      equality_criteria:
+        - "date"
+      immutability: true
+
+    - id: vo_recurrence_pattern
+      name: "RecurrencePattern"
+      description: "Pattern defining recurring payment frequency"
+      attributes:
+        - name: frequency
+          type: Enum
+          required: true
+          description: "DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY"
+        - name: interval
+          type: Integer
+          required: true
+          description: "Number of frequency periods between executions (e.g., 2 for bi-weekly)"
+        - name: day_of_month
+          type: Integer
+          required: false
+          description: "For monthly patterns, day of month (1-31)"
+        - name: day_of_week
+          type: Enum
+          required: false
+          description: "For weekly patterns, day of week"
+      validation_rules:
+        - "Interval must be positive"
+        - "Day of month must be between 1 and 31 if specified"
+        - "Frequency and interval must be compatible"
+      equality_criteria:
+        - "frequency"
+        - "interval"
+        - "day_of_month"
+        - "day_of_week"
+      immutability: true
+
+    - id: vo_payment_status
+      name: "PaymentStatus"
+      description: "Current status of a scheduled payment"
+      attributes:
+        - name: status
+          type: Enum
+          required: true
+          description: "DRAFT, SCHEDULED, EXECUTING, COMPLETED, FAILED, CANCELLED"
+      validation_rules:
+        - "Must be one of the defined enum values"
+      equality_criteria:
+        - "status"
+      immutability: true
+
+    - id: vo_approval_status
+      name: "ApprovalStatus"
+      description: "Approval state of a payment template"
+      attributes:
+        - name: status
+          type: Enum
+          required: true
+          description: "DRAFT, PENDING_APPROVAL, APPROVED, REJECTED"
+      validation_rules:
+        - "Must be one of the defined enum values"
+        - "State transitions must follow approval workflow"
+      equality_criteria:
+        - "status"
+      immutability: true
+
+    - id: vo_jurisdiction_code
+      name: "JurisdictionCode"
+      description: "Geographic jurisdiction for calendar rules"
+      attributes:
+        - name: code
+          type: String
+          required: true
+          description: "ISO country code (CA, US, UK, etc.)"
+      validation_rules:
+        - "Must be valid ISO 3166-1 alpha-2 country code"
+      equality_criteria:
+        - "code"
+      immutability: true
+
+    - id: vo_user_id
+      name: "UserId"
+      description: "Identifier for a user in the system"
+      attributes:
+        - name: id
+          type: String
+          required: true
+      validation_rules:
+        - "Must be non-empty"
+      equality_criteria:
+        - "id"
+      immutability: true
+
+  entities:
+    - id: ent_payment_template
+      name: "PaymentTemplate"
+      aggregate_ref: agg_payment_template
+      is_aggregate_root: true
+      identity_field: "template_id"
+      identity_generation: auto_generated
+      attributes:
+        - name: template_id
+          type: String
+          value_object_ref: vo_payment_template_id
+          required: true
+        - name: template_name
+          type: String
+          required: true
+          description: "User-friendly name for the template"
+        - name: payment_type
+          type: Enum
+          value_object_ref: vo_payment_type
+          required: true
+        - name: debit_account
+          type: String
+          value_object_ref: vo_account_number
+          required: true
+        - name: credit_account
+          type: String
+          value_object_ref: vo_account_number
+          required: true
+        - name: amount
+          type: Money
+          value_object_ref: vo_amount
+          required: true
+        - name: approval_status
+          type: Enum
+          value_object_ref: vo_approval_status
+          required: true
+        - name: created_by
+          type: String
+          value_object_ref: vo_user_id
+          required: true
+        - name: created_at
+          type: DateTime
+          required: true
+        - name: approved_by
+          type: String
+          required: false
+        - name: approved_at
+          type: DateTime
+          required: false
+      business_methods:
+        - name: submit_for_approval
+          description: "Submit template for approval workflow"
+          parameters:
+            - name: reason
+              type: String
+              required: true
+          returns: "void"
+        - name: approve
+          description: "Approve the template"
+          parameters:
+            - name: approved_by
+              type: String
+              value_object_ref: vo_user_id
+              required: true
+            - name: notes
+              type: String
+              required: false
+          returns: "void"
+        - name: reject
+          description: "Reject the template"
+          parameters:
+            - name: rejected_by
+              type: String
+              value_object_ref: vo_user_id
+              required: true
+            - name: reason
+              type: String
+              required: true
+          returns: "void"
+        - name: is_approved
+          description: "Check if template is approved"
+          returns: "boolean"
+      invariants:
+        - "All required payment fields must be valid"
+        - "Amount must be positive or AVAILABLE_BALANCE for account transfers"
+        - "Template cannot be modified after approval"
+        - "Approval status transitions must follow workflow rules"
+
+    - id: ent_scheduled_payment
+      name: "ScheduledPayment"
+      aggregate_ref: agg_scheduled_payment
+      is_aggregate_root: true
+      identity_field: "payment_id"
+      identity_generation: auto_generated
+      attributes:
+        - name: payment_id
+          type: String
+          value_object_ref: vo_payment_id
+          required: true
+        - name: template_id
+          type: String
+          value_object_ref: vo_payment_template_id
+          required: true
+        - name: value_date
+          type: Date
+          required: true
+          description: "Date when payment should be valued"
+        - name: execution_date
+          type: Date
+          value_object_ref: vo_execution_date
+          required: true
+        - name: status
+          type: Enum
+          value_object_ref: vo_payment_status
+          required: true
+        - name: scheduled_by
+          type: String
+          value_object_ref: vo_user_id
+          required: true
+        - name: scheduled_at
+          type: DateTime
+          required: true
+        - name: jurisdiction
+          type: String
+          value_object_ref: vo_jurisdiction_code
+          required: true
+      business_methods:
+        - name: execute
+          description: "Mark payment as executing"
+          returns: "void"
+        - name: mark_completed
+          description: "Mark payment as successfully completed"
+          returns: "void"
+        - name: mark_failed
+          description: "Mark payment as failed"
+          parameters:
+            - name: reason
+              type: String
+              required: true
+          returns: "void"
+        - name: cancel
+          description: "Cancel the scheduled payment"
+          parameters:
+            - name: cancelled_by
+              type: String
+              value_object_ref: vo_user_id
+              required: true
+            - name: reason
+              type: String
+              required: true
+          returns: "void"
+        - name: modify_execution_date
+          description: "Change the execution date"
+          parameters:
+            - name: new_date
+              type: Date
+              value_object_ref: vo_execution_date
+              required: true
+          returns: "void"
+        - name: can_be_modified
+          description: "Check if payment can be modified"
+          returns: "boolean"
+      invariants:
+        - "Must reference a valid approved template"
+        - "Execution date must be a valid working day for jurisdiction"
+        - "Cannot execute before value date"
+        - "Cannot be modified once execution has started"
+        - "Status transitions must be valid (e.g., cannot go from COMPLETED to SCHEDULED)"
+
+    - id: ent_payment_group
+      name: "PaymentGroup"
+      aggregate_ref: agg_payment_group
+      is_aggregate_root: true
+      identity_field: "group_id"
+      identity_generation: auto_generated
+      attributes:
+        - name: group_id
+          type: String
+          value_object_ref: vo_payment_group_id
+          required: true
+        - name: group_name
+          type: String
+          required: true
+        - name: description
+          type: String
+          required: false
+        - name: template_ids
+          type: List
+          required: true
+          description: "List of template IDs in this group"
+        - name: created_by
+          type: String
+          value_object_ref: vo_user_id
+          required: true
+        - name: created_at
+          type: DateTime
+          required: true
+      business_methods:
+        - name: add_template
+          description: "Add a template to the group"
+          parameters:
+            - name: template_id
+              type: String
+              value_object_ref: vo_payment_template_id
+              required: true
+          returns: "void"
+        - name: remove_template
+          description: "Remove a template from the group"
+          parameters:
+            - name: template_id
+              type: String
+              value_object_ref: vo_payment_template_id
+              required: true
+          returns: "void"
+        - name: get_template_count
+          description: "Get number of templates in group"
+          returns: "Integer"
+      invariants:
+        - "Group must have at least one template"
+        - "Cannot add duplicate templates to same group"
+        - "All templates must be approved before group can be executed"
+
+    - id: ent_schedule
+      name: "Schedule"
+      aggregate_ref: agg_schedule
+      is_aggregate_root: true
+      identity_field: "schedule_id"
+      identity_generation: auto_generated
+      attributes:
+        - name: schedule_id
+          type: String
+          value_object_ref: vo_schedule_id
+          required: true
+        - name: template_id
+          type: String
+          value_object_ref: vo_payment_template_id
+          required: true
+        - name: recurrence_pattern
+          type: Object
+          value_object_ref: vo_recurrence_pattern
+          required: true
+        - name: start_date
+          type: Date
+          required: true
+        - name: end_date
+          type: Date
+          required: false
+          description: "Optional end date for recurring payments"
+        - name: last_execution_date
+          type: Date
+          required: false
+        - name: next_execution_date
+          type: Date
+          required: true
+        - name: status
+          type: Enum
+          required: true
+          description: "ACTIVE, PAUSED, COMPLETED, CANCELLED"
+        - name: created_by
+          type: String
+          value_object_ref: vo_user_id
+          required: true
+      business_methods:
+        - name: calculate_next_execution
+          description: "Calculate next execution date based on recurrence pattern"
+          returns: "Date"
+        - name: pause
+          description: "Pause the recurring schedule"
+          returns: "void"
+        - name: resume
+          description: "Resume a paused schedule"
+          returns: "void"
+        - name: cancel
+          description: "Cancel the schedule"
+          parameters:
+            - name: reason
+              type: String
+              required: true
+          returns: "void"
+      invariants:
+        - "Valid recurrence pattern required"
+        - "Must respect working day calendar for jurisdiction"
+        - "Cannot overlap with existing active schedules for same template"
+        - "End date must be after start date if specified"
+        - "Next execution date must be calculated correctly from pattern"
+
+  aggregates:
+    - id: agg_payment_template
+      name: "Payment Template Aggregate"
+      root_ref: ent_payment_template
+      entities:
+        - ent_payment_template
+      value_objects:
+        - vo_payment_template_id
+        - vo_payment_type
+        - vo_account_number
+        - vo_amount
+        - vo_approval_status
+        - vo_user_id
+      consistency_rules:
+        - "All required payment fields must be valid for the payment type"
+        - "Amount rules must be enforced based on payment type"
+        - "Approval status transitions must follow workflow"
+      invariants:
+        - "Template data must be complete and valid"
+        - "Cannot modify template after it has been approved"
+        - "Payment type specific validations must pass"
+      size_estimate: small
+
+    - id: agg_scheduled_payment
+      name: "Scheduled Payment Aggregate"
+      root_ref: ent_scheduled_payment
+      entities:
+        - ent_scheduled_payment
+      value_objects:
+        - vo_payment_id
+        - vo_payment_template_id
+        - vo_execution_date
+        - vo_payment_status
+        - vo_jurisdiction_code
+        - vo_user_id
+      consistency_rules:
+        - "Must reference a valid approved template"
+        - "Execution date must be valid working day"
+        - "Status transitions must be valid"
+      invariants:
+        - "Cannot execute before value date"
+        - "Cannot modify after execution starts"
+        - "Execution date must respect working day calendar"
+      size_estimate: small
+
+    - id: agg_payment_group
+      name: "Payment Group Aggregate"
+      root_ref: ent_payment_group
+      entities:
+        - ent_payment_group
+      value_objects:
+        - vo_payment_group_id
+        - vo_payment_template_id
+        - vo_user_id
+      consistency_rules:
+        - "Must contain at least one template"
+        - "All templates must be approved"
+        - "No duplicate templates"
+      invariants:
+        - "Group must have minimum one template"
+        - "Templates must exist and be approved"
+        - "Template IDs must be unique within group"
+      size_estimate: small
+
+    - id: agg_schedule
+      name: "Schedule Aggregate"
+      root_ref: ent_schedule
+      entities:
+        - ent_schedule
+      value_objects:
+        - vo_schedule_id
+        - vo_payment_template_id
+        - vo_recurrence_pattern
+        - vo_execution_date
+        - vo_user_id
+      consistency_rules:
+        - "Recurrence pattern must be valid"
+        - "Next execution must be calculated correctly"
+        - "Must respect working day calendar"
+      invariants:
+        - "Valid recurrence pattern required"
+        - "Cannot overlap existing active schedules"
+        - "Execution dates must be working days"
+      size_estimate: medium
+
+  repositories:
+    - id: repo_payment_template
+      name: "PaymentTemplateRepository"
+      aggregate_ref: agg_payment_template
+      interface_methods:
+        - name: save
+          description: "Persist a payment template"
+          parameters:
+            - name: template
+              type: PaymentTemplate
+              required: true
+          returns: "void"
+        - name: find_by_id
+          description: "Find template by ID"
+          parameters:
+            - name: template_id
+              type: String
+              value_object_ref: vo_payment_template_id
+              required: true
+          returns: "Optional<PaymentTemplate>"
+        - name: find_by_user
+          description: "Find all templates for a user"
+          parameters:
+            - name: user_id
+              type: String
+              value_object_ref: vo_user_id
+              required: true
+          returns: "List<PaymentTemplate>"
+        - name: find_pending_approval
+          description: "Find templates pending approval"
+          returns: "List<PaymentTemplate>"
+      persistence_strategy: "JPA with PostgreSQL"
+
+    - id: repo_scheduled_payment
+      name: "ScheduledPaymentRepository"
+      aggregate_ref: agg_scheduled_payment
+      interface_methods:
+        - name: save
+          description: "Persist a scheduled payment"
+          parameters:
+            - name: payment
+              type: ScheduledPayment
+              required: true
+          returns: "void"
+        - name: find_by_id
+          description: "Find payment by ID"
+          parameters:
+            - name: payment_id
+              type: String
+              value_object_ref: vo_payment_id
+              required: true
+          returns: "Optional<ScheduledPayment>"
+        - name: find_by_execution_date
+          description: "Find payments scheduled for execution on a specific date"
+          parameters:
+            - name: execution_date
+              type: Date
+              required: true
+          returns: "List<ScheduledPayment>"
+        - name: find_by_user_and_date_range
+          description: "Find user's payments within date range"
+          parameters:
+            - name: user_id
+              type: String
+              value_object_ref: vo_user_id
+              required: true
+            - name: start_date
+              type: Date
+              required: true
+            - name: end_date
+              type: Date
+              required: true
+          returns: "List<ScheduledPayment>"
+      persistence_strategy: "JPA with PostgreSQL"
+
+    - id: repo_payment_group
+      name: "PaymentGroupRepository"
+      aggregate_ref: agg_payment_group
+      interface_methods:
+        - name: save
+          parameters:
+            - name: group
+              type: PaymentGroup
+              required: true
+          returns: "void"
+        - name: find_by_id
+          parameters:
+            - name: group_id
+              type: String
+              value_object_ref: vo_payment_group_id
+              required: true
+          returns: "Optional<PaymentGroup>"
+        - name: find_by_user
+          parameters:
+            - name: user_id
+              type: String
+              value_object_ref: vo_user_id
+              required: true
+          returns: "List<PaymentGroup>"
+      persistence_strategy: "JPA with PostgreSQL"
+
+    - id: repo_schedule
+      name: "ScheduleRepository"
+      aggregate_ref: agg_schedule
+      interface_methods:
+        - name: save
+          parameters:
+            - name: schedule
+              type: Schedule
+              required: true
+          returns: "void"
+        - name: find_by_id
+          parameters:
+            - name: schedule_id
+              type: String
+              value_object_ref: vo_schedule_id
+              required: true
+          returns: "Optional<Schedule>"
+        - name: find_active_schedules
+          description: "Find all active recurring schedules"
+          returns: "List<Schedule>"
+        - name: find_due_for_execution
+          description: "Find schedules with next execution date today or earlier"
+          parameters:
+            - name: as_of_date
+              type: Date
+              required: true
+          returns: "List<Schedule>"
+      persistence_strategy: "JPA with PostgreSQL"
+
+  domain_services:
+    - id: svc_dom_working_day_calculation
+      name: "WorkingDayCalculationService"
+      description: "Calculates valid execution dates based on jurisdiction-specific working day calendars"
+      stateless: true
+      operations:
+        - name: calculate_execution_date
+          description: "Calculate nearest working day for a value date"
+          parameters:
+            - name: value_date
+              type: Date
+              required: true
+            - name: jurisdiction
+              type: String
+              value_object_ref: vo_jurisdiction_code
+              required: true
+          returns: "Date"
+        - name: is_working_day
+          description: "Check if a date is a working day"
+          parameters:
+            - name: date
+              type: Date
+              required: true
+            - name: jurisdiction
+              type: String
+              value_object_ref: vo_jurisdiction_code
+              required: true
+          returns: "Boolean"
+        - name: next_working_day
+          description: "Get next working day after a given date"
+          parameters:
+            - name: date
+              type: Date
+              required: true
+            - name: jurisdiction
+              type: String
+              value_object_ref: vo_jurisdiction_code
+              required: true
+          returns: "Date"
+
+    - id: svc_dom_payment_validation
+      name: "PaymentValidationService"
+      description: "Validates payment details according to payment type-specific rules"
+      stateless: true
+      operations:
+        - name: validate_payment_details
+          description: "Validate payment details for a specific payment type"
+          parameters:
+            - name: payment_type
+              type: Enum
+              value_object_ref: vo_payment_type
+              required: true
+            - name: amount
+              type: Money
+              value_object_ref: vo_amount
+              required: true
+            - name: debit_account
+              type: String
+              value_object_ref: vo_account_number
+              required: true
+            - name: credit_account
+              type: String
+              required: true
+          returns: "ValidationResult"
+        - name: validate_ach_payment
+          description: "ACH-specific validation rules"
+          parameters:
+            - name: amount
+              type: Money
+              required: true
+          returns: "Boolean"
+        - name: validate_wire_payment
+          description: "Wire payment specific validation"
+          parameters:
+            - name: amount
+              type: Money
+              required: true
+            - name: destination_country
+              type: String
+              required: true
+          returns: "Boolean"
+
+    - id: svc_dom_recurrence_calculation
+      name: "RecurrenceCalculationService"
+      description: "Calculates next execution dates based on recurrence patterns"
+      stateless: true
+      operations:
+        - name: calculate_next_execution_date
+          description: "Calculate next execution date from recurrence pattern"
+          parameters:
+            - name: pattern
+              type: RecurrencePattern
+              value_object_ref: vo_recurrence_pattern
+              required: true
+            - name: last_execution_date
+              type: Date
+              required: true
+            - name: jurisdiction
+              type: String
+              value_object_ref: vo_jurisdiction_code
+              required: true
+          returns: "Date"
+        - name: calculate_all_occurrences
+          description: "Calculate all occurrence dates within a date range"
+          parameters:
+            - name: pattern
+              type: RecurrencePattern
+              value_object_ref: vo_recurrence_pattern
+              required: true
+            - name: start_date
+              type: Date
+              required: true
+            - name: end_date
+              type: Date
+              required: true
+          returns: "List<Date>"
+
+    - id: svc_dom_approval_policy
+      name: "ApprovalPolicyService"
+      description: "Determines approval requirements based on company-specific policies"
+      stateless: true
+      operations:
+        - name: requires_approval
+          description: "Check if template requires approval"
+          parameters:
+            - name: payment_type
+              type: Enum
+              value_object_ref: vo_payment_type
+              required: true
+            - name: amount
+              type: Money
+              value_object_ref: vo_amount
+              required: true
+            - name: created_by
+              type: String
+              value_object_ref: vo_user_id
+              required: true
+          returns: "Boolean"
+        - name: get_required_approvers
+          description: "Get list of required approvers for a template"
+          parameters:
+            - name: template_id
+              type: String
+              value_object_ref: vo_payment_template_id
+              required: true
+          returns: "List<String>"
+
+  application_services:
+    - id: svc_app_payment_template
+      name: "PaymentTemplateApplicationService"
+      description: "Orchestrates payment template use cases including creation, approval workflow, and lifecycle management"
+      implements_commands:
+        - cmd_payment_template_commands
+      implements_queries:
+        - qry_payment_template_queries
+      operations:
+        - name: create_template
+          type: command
+          description: "Create a new payment template"
+          parameters:
+            - name: command
+              type: CreatePaymentTemplateCmd
+              required: true
+          returns: "String"
+          transaction_boundary:
+            is_transactional: true
+            modifies_aggregates:
+              - agg_payment_template
+            consistency_type: transactional
+          workflow:
+            validates_input: true
+            loads_aggregates: []
+            invokes_domain_operations:
+              - "validate_payment_details"
+              - "requires_approval"
+            invokes_domain_services:
+              - svc_dom_payment_validation
+              - svc_dom_approval_policy
+            persists_aggregates: true
+            publishes_events:
+              - evt_payment_template_created
+        - name: submit_for_approval
+          type: command
+          description: "Submit template for approval"
+          parameters:
+            - name: command
+              type: SubmitTemplateForApprovalCmd
+              required: true
+          returns: "void"
+          transaction_boundary:
+            is_transactional: true
+            modifies_aggregates:
+              - agg_payment_template
+            consistency_type: transactional
+          workflow:
+            validates_input: true
+            loads_aggregates:
+              - agg_payment_template
+            invokes_domain_operations:
+              - "submit_for_approval"
+            persists_aggregates: true
+            publishes_events:
+              - evt_template_submitted_for_approval
+        - name: approve_template
+          type: command
+          parameters:
+            - name: command
+              type: ApproveTemplateCmd
+              required: true
+          returns: "void"
+          transaction_boundary:
+            is_transactional: true
+            modifies_aggregates:
+              - agg_payment_template
+            consistency_type: transactional
+          workflow:
+            validates_input: true
+            loads_aggregates:
+              - agg_payment_template
+            invokes_domain_operations:
+              - "approve"
+            persists_aggregates: true
+            publishes_events:
+              - evt_template_approved
+        - name: reject_template
+          type: command
+          parameters:
+            - name: command
+              type: RejectTemplateCmd
+              required: true
+          returns: "void"
+          transaction_boundary:
+            is_transactional: true
+            modifies_aggregates:
+              - agg_payment_template
+            consistency_type: transactional
+          workflow:
+            loads_aggregates:
+              - agg_payment_template
+            invokes_domain_operations:
+              - "reject"
+            persists_aggregates: true
+            publishes_events:
+              - evt_template_rejected
+        - name: get_template
+          type: query
+          parameters:
+            - name: template_id
+              type: String
+              value_object_ref: vo_payment_template_id
+              required: true
+          returns: "TemplateSummary"
+          transaction_boundary:
+            is_transactional: false
+          workflow:
+            validates_input: true
+            loads_aggregates:
+              - agg_payment_template
+            returns_dto: "TemplateSummary"
+      dependencies:
+        repositories:
+          - repo_payment_template
+        domain_services:
+          - svc_dom_payment_validation
+          - svc_dom_approval_policy
+        event_publishers:
+          - type: outbox_pattern
+            description: "Events published via transactional outbox pattern"
+      characteristics:
+        stateless: true
+        contains_business_logic: false
+        manages_transactions: true
+        coordinates_aggregates: true
+        publishes_events: true
+        performs_authorization: true
+      layer: "application"
+
+    - id: svc_app_scheduled_payment
+      name: "ScheduledPaymentApplicationService"
+      description: "Orchestrates payment scheduling use cases including future-dated and recurring payment scheduling"
+      implements_commands:
+        - cmd_scheduled_payment_commands
+      implements_queries:
+        - qry_scheduled_payment_queries
+      operations:
+        - name: schedule_future_payment
+          type: command
+          description: "Schedule a one-time future-dated payment"
+          parameters:
+            - name: command
+              type: ScheduleFuturePaymentCmd
+              required: true
+          returns: "String"
+          transaction_boundary:
+            is_transactional: true
+            modifies_aggregates:
+              - agg_scheduled_payment
+            consistency_type: transactional
+          workflow:
+            validates_input: true
+            loads_aggregates:
+              - agg_payment_template
+            invokes_domain_operations:
+              - "calculate_execution_date"
+              - "is_working_day"
+            invokes_domain_services:
+              - svc_dom_working_day_calculation
+            persists_aggregates: true
+            publishes_events:
+              - evt_payment_scheduled
+        - name: schedule_recurring_payment
+          type: command
+          description: "Schedule recurring payment based on template and recurrence pattern"
+          parameters:
+            - name: command
+              type: ScheduleRecurringPaymentCmd
+              required: true
+          returns: "String"
+          transaction_boundary:
+            is_transactional: true
+            modifies_aggregates:
+              - agg_schedule
+            consistency_type: transactional
+          workflow:
+            validates_input: true
+            loads_aggregates:
+              - agg_payment_template
+            invokes_domain_operations:
+              - "calculate_next_execution_date"
+            invokes_domain_services:
+              - svc_dom_recurrence_calculation
+              - svc_dom_working_day_calculation
+            persists_aggregates: true
+            publishes_events:
+              - evt_recurring_payment_scheduled
+        - name: cancel_payment
+          type: command
+          parameters:
+            - name: command
+              type: CancelPaymentCmd
+              required: true
+          returns: "void"
+          transaction_boundary:
+            is_transactional: true
+            modifies_aggregates:
+              - agg_scheduled_payment
+            consistency_type: transactional
+          workflow:
+            loads_aggregates:
+              - agg_scheduled_payment
+            invokes_domain_operations:
+              - "cancel"
+            persists_aggregates: true
+            publishes_events:
+              - evt_payment_cancelled
+        - name: modify_payment
+          type: command
+          parameters:
+            - name: command
+              type: ModifyPaymentCmd
+              required: true
+          returns: "void"
+          transaction_boundary:
+            is_transactional: true
+            modifies_aggregates:
+              - agg_scheduled_payment
+            consistency_type: transactional
+          workflow:
+            loads_aggregates:
+              - agg_scheduled_payment
+            invokes_domain_operations:
+              - "modify_execution_date"
+            invokes_domain_services:
+              - svc_dom_working_day_calculation
+            persists_aggregates: true
+            publishes_events:
+              - evt_payment_modified
+        - name: get_payment_status
+          type: query
+          parameters:
+            - name: payment_id
+              type: String
+              value_object_ref: vo_payment_id
+              required: true
+          returns: "PaymentStatusSummary"
+          transaction_boundary:
+            is_transactional: false
+          workflow:
+            loads_aggregates:
+              - agg_scheduled_payment
+            returns_dto: "PaymentStatusSummary"
+      dependencies:
+        repositories:
+          - repo_scheduled_payment
+          - repo_payment_template
+          - repo_schedule
+        domain_services:
+          - svc_dom_working_day_calculation
+          - svc_dom_recurrence_calculation
+        event_publishers:
+          - type: outbox_pattern
+      characteristics:
+        stateless: true
+        contains_business_logic: false
+        manages_transactions: true
+        coordinates_aggregates: true
+        publishes_events: true
+      layer: "application"
+
+  command_interfaces:
+    - id: cmd_payment_template_commands
+      name: "PaymentTemplateCommands"
+      aggregate_ref: agg_payment_template
+      description: "Command interface for payment template operations"
+      command_records:
+        - record_name: "CreatePaymentTemplateCmd"
+          intent: "create"
+          description: "Create a new payment template"
+          parameters:
+            - name: template_name
+              type: String
+              required: true
+            - name: payment_type
+              type: String
+              required: true
+            - name: debit_account
+              type: String
+              required: true
+            - name: credit_account
+              type: String
+              required: true
+            - name: amount
+              type: String
+              required: true
+            - name: currency
+              type: String
+              required: true
+            - name: created_by
+              type: String
+              required: true
+          returns: domain_id
+          return_type_ref: vo_payment_template_id
+          modifies_aggregate: agg_payment_template
+          publishes_events:
+            - evt_payment_template_created
+        - record_name: "SubmitTemplateForApprovalCmd"
+          intent: "submit"
+          parameters:
+            - name: template_id
+              type: String
+              required: true
+            - name: reason
+              type: String
+              required: true
+            - name: submitted_by
+              type: String
+              required: true
+          returns: void
+          modifies_aggregate: agg_payment_template
+          publishes_events:
+            - evt_template_submitted_for_approval
+        - record_name: "ApproveTemplateCmd"
+          intent: "approve"
+          parameters:
+            - name: template_id
+              type: String
+              required: true
+            - name: approved_by
+              type: String
+              required: true
+            - name: approval_notes
+              type: String
+              required: false
+          returns: void
+          modifies_aggregate: agg_payment_template
+          publishes_events:
+            - evt_template_approved
+          audit_fields:
+            - "approved_by"
+            - "approval_notes"
+        - record_name: "RejectTemplateCmd"
+          intent: "reject"
+          parameters:
+            - name: template_id
+              type: String
+              required: true
+            - name: rejected_by
+              type: String
+              required: true
+            - name: rejection_reason
+              type: String
+              required: true
+          returns: void
+          modifies_aggregate: agg_payment_template
+          publishes_events:
+            - evt_template_rejected
+          audit_fields:
+            - "rejected_by"
+            - "rejection_reason"
+      immutability: true
+      layer: "api"
+
+    - id: cmd_scheduled_payment_commands
+      name: "ScheduledPaymentCommands"
+      aggregate_ref: agg_scheduled_payment
+      description: "Command interface for scheduled payment operations"
+      command_records:
+        - record_name: "ScheduleFuturePaymentCmd"
+          intent: "schedule"
+          parameters:
+            - name: template_id
+              type: String
+              required: true
+            - name: value_date
+              type: String
+              required: true
+            - name: jurisdiction
+              type: String
+              required: true
+            - name: scheduled_by
+              type: String
+              required: true
+          returns: domain_id
+          return_type_ref: vo_payment_id
+          modifies_aggregate: agg_scheduled_payment
+          publishes_events:
+            - evt_payment_scheduled
+        - record_name: "ScheduleRecurringPaymentCmd"
+          intent: "schedule"
+          parameters:
+            - name: template_id
+              type: String
+              required: true
+            - name: recurrence_pattern
+              type: String
+              required: true
+            - name: start_date
+              type: String
+              required: true
+            - name: end_date
+              type: String
+              required: false
+            - name: jurisdiction
+              type: String
+              required: true
+            - name: scheduled_by
+              type: String
+              required: true
+          returns: domain_id
+          return_type_ref: vo_schedule_id
+          modifies_aggregate: agg_schedule
+          publishes_events:
+            - evt_recurring_payment_scheduled
+        - record_name: "CancelPaymentCmd"
+          intent: "cancel"
+          parameters:
+            - name: payment_id
+              type: String
+              required: true
+            - name: cancelled_by
+              type: String
+              required: true
+            - name: cancellation_reason
+              type: String
+              required: true
+          returns: void
+          modifies_aggregate: agg_scheduled_payment
+          publishes_events:
+            - evt_payment_cancelled
+          audit_fields:
+            - "cancelled_by"
+            - "cancellation_reason"
+        - record_name: "ModifyPaymentCmd"
+          intent: "modify"
+          parameters:
+            - name: payment_id
+              type: String
+              required: true
+            - name: new_value_date
+              type: String
+              required: false
+            - name: new_amount
+              type: String
+              required: false
+            - name: modified_by
+              type: String
+              required: true
+          returns: void
+          modifies_aggregate: agg_scheduled_payment
+          publishes_events:
+            - evt_payment_modified
+      immutability: true
+      layer: "api"
+
+  query_interfaces:
+    - id: qry_payment_template_queries
+      name: "PaymentTemplateQueries"
+      aggregate_ref: agg_payment_template
+      description: "Query interface for retrieving payment template data"
+      query_methods:
+        - method_name: "getTemplate"
+          description: "Get detailed template information"
+          parameters:
+            - name: template_id
+              type: String
+              value_object_ref: vo_payment_template_id
+              required: true
+          result_record_name: "TemplateSummary"
+          result_structure:
+            fields:
+              - name: template_id
+                type: String
+                serialization: "UUID as string"
+              - name: template_name
+                type: String
+              - name: payment_type
+                type: String
+                serialization: "Enum as string"
+              - name: amount
+                type: String
+                serialization: "Money as formatted string"
+              - name: approval_status
+                type: String
+                serialization: "Enum as string"
+              - name: created_by
+                type: String
+              - name: created_at
+                type: String
+                serialization: "ISO 8601 timestamp"
+          bypasses_domain_model: false
+        - method_name: "listTemplates"
+          description: "List all templates for a user"
+          parameters:
+            - name: user_id
+              type: String
+              required: true
+          result_record_name: "TemplateListSummary"
+          result_structure:
+            fields:
+              - name: templates
+                type: String
+                description: "JSON array of template summaries"
+            aggregate_counts:
+              - field_name: template_count
+                counted_entity: "PaymentTemplate"
+          bypasses_domain_model: false
+        - method_name: "listPendingApprovals"
+          description: "List templates pending approval"
+          result_record_name: "PendingApprovalsSummary"
+          result_structure:
+            fields:
+              - name: pending_templates
+                type: String
+                description: "JSON array of templates awaiting approval"
+          bypasses_domain_model: false
+      result_characteristics:
+        immutable: true
+        flat_structure: true
+        string_serialization: true
+      layer: "api"
+      no_side_effects: true
+
+    - id: qry_scheduled_payment_queries
+      name: "ScheduledPaymentQueries"
+      aggregate_ref: agg_scheduled_payment
+      description: "Query interface for retrieving scheduled payment data"
+      query_methods:
+        - method_name: "getPaymentStatus"
+          description: "Get current status and details of a payment"
+          parameters:
+            - name: payment_id
+              type: String
+              value_object_ref: vo_payment_id
+              required: true
+          result_record_name: "PaymentStatusSummary"
+          result_structure:
+            fields:
+              - name: payment_id
+                type: String
+              - name: status
+                type: String
+                serialization: "Enum as string"
+              - name: value_date
+                type: String
+                serialization: "Date as ISO string"
+              - name: execution_date
+                type: String
+                serialization: "Date as ISO string"
+              - name: amount
+                type: String
+                serialization: "Money formatted"
+              - name: payment_type
+                type: String
+          bypasses_domain_model: false
+          optimizations:
+            denormalized: false
+            cached: true
+            indexed: true
+        - method_name: "listScheduledPayments"
+          description: "List scheduled payments within date range"
+          parameters:
+            - name: user_id
+              type: String
+              required: true
+            - name: start_date
+              type: String
+              required: true
+            - name: end_date
+              type: String
+              required: true
+          result_record_name: "PaymentListSummary"
+          result_structure:
+            fields:
+              - name: payments
+                type: String
+                description: "JSON array of payment summaries"
+            aggregate_counts:
+              - field_name: payment_count
+                counted_entity: "ScheduledPayment"
+              - field_name: total_amount
+                counted_entity: "Amount"
+          bypasses_domain_model: false
+          optimizations:
+            denormalized: true
+            cached: false
+            indexed: true
+        - method_name: "listPaymentsByGroup"
+          description: "List all payments in a payment group"
+          parameters:
+            - name: group_id
+              type: String
+              value_object_ref: vo_payment_group_id
+              required: true
+          result_record_name: "GroupPaymentsSummary"
+          result_structure:
+            fields:
+              - name: group_id
+                type: String
+              - name: group_name
+                type: String
+              - name: payments
+                type: String
+                description: "JSON array of payments in group"
+          bypasses_domain_model: false
+      result_characteristics:
+        immutable: true
+        flat_structure: true
+        string_serialization: true
+      layer: "api"
+      no_side_effects: true
+
+  domain_events:
+    - id: evt_payment_template_created
+      name: "PaymentTemplateCreated"
+      aggregate_ref: agg_payment_template
+      description: "A new payment template has been created"
+      data_carried:
+        - name: template_id
+          type: String
+          value_object_ref: vo_payment_template_id
+          required: true
+        - name: payment_type
+          type: String
+          value_object_ref: vo_payment_type
+          required: true
+        - name: amount
+          type: String
+          required: true
+        - name: created_by
+          type: String
+          required: true
+        - name: created_at
+          type: String
+          required: true
+      immutable: true
+
+    - id: evt_template_submitted_for_approval
+      name: "TemplateSubmittedForApproval"
+      aggregate_ref: agg_payment_template
+      description: "Template has been submitted to approval workflow"
+      data_carried:
+        - name: template_id
+          type: String
+          required: true
+        - name: submitted_by
+          type: String
+          required: true
+        - name: submitted_at
+          type: String
+          required: true
+      immutable: true
+
+    - id: evt_template_approved
+      name: "TemplateApproved"
+      aggregate_ref: agg_payment_template
+      description: "Template has been approved"
+      data_carried:
+        - name: template_id
+          type: String
+          required: true
+        - name: approved_by
+          type: String
+          required: true
+        - name: approved_at
+          type: String
+          required: true
+      immutable: true
+
+    - id: evt_template_rejected
+      name: "TemplateRejected"
+      aggregate_ref: agg_payment_template
+      description: "Template has been rejected"
+      data_carried:
+        - name: template_id
+          type: String
+          required: true
+        - name: rejected_by
+          type: String
+          required: true
+        - name: rejection_reason
+          type: String
+          required: true
+        - name: rejected_at
+          type: String
+          required: true
+      immutable: true
+
+    - id: evt_payment_scheduled
+      name: "PaymentScheduled"
+      aggregate_ref: agg_scheduled_payment
+      description: "A payment has been scheduled for future execution"
+      data_carried:
+        - name: payment_id
+          type: String
+          value_object_ref: vo_payment_id
+          required: true
+        - name: template_id
+          type: String
+          required: true
+        - name: value_date
+          type: String
+          required: true
+        - name: execution_date
+          type: String
+          required: true
+        - name: scheduled_by
+          type: String
+          required: true
+      immutable: true
+
+    - id: evt_recurring_payment_scheduled
+      name: "RecurringPaymentScheduled"
+      aggregate_ref: agg_schedule
+      description: "A recurring payment schedule has been created"
+      data_carried:
+        - name: schedule_id
+          type: String
+          value_object_ref: vo_schedule_id
+          required: true
+        - name: template_id
+          type: String
+          required: true
+        - name: recurrence_pattern
+          type: String
+          required: true
+        - name: next_execution_date
+          type: String
+          required: true
+      immutable: true
+
+    - id: evt_payment_cancelled
+      name: "PaymentCancelled"
+      aggregate_ref: agg_scheduled_payment
+      description: "A scheduled payment has been cancelled"
+      data_carried:
+        - name: payment_id
+          type: String
+          required: true
+        - name: cancelled_by
+          type: String
+          required: true
+        - name: cancellation_reason
+          type: String
+          required: true
+        - name: cancelled_at
+          type: String
+          required: true
+      immutable: true
+
+    - id: evt_payment_modified
+      name: "PaymentModified"
+      aggregate_ref: agg_scheduled_payment
+      description: "A scheduled payment has been modified"
+      data_carried:
+        - name: payment_id
+          type: String
+          required: true
+        - name: modifications
+          type: String
+          description: "JSON describing what was changed"
+          required: true
+        - name: modified_by
+          type: String
+          required: true
+        - name: modified_at
+          type: String
+          required: true
+      immutable: true

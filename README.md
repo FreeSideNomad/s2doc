@@ -1,441 +1,309 @@
-# Domain Stories Visualization Tool
+# S2Doc - Stories to Documentation
 
-A Python-based converter that transforms Domain Stories YAML models into **structured Markdown documentation with embedded Mermaid diagrams**.
+**Convert YAML domain models to beautiful Markdown documentation**
 
-## Overview
+S2Doc is a unified command-line tool that automatically detects and converts three types of Domain-Driven Design YAML schemas into comprehensive Markdown documentation with Mermaid diagrams.
 
-This tool converts complex Domain-Driven Design (DDD) models from YAML format into human-readable, GitHub-friendly documentation with interactive visualizations.
+## Features
 
-### Features
+- 🔍 **Automatic Schema Detection** - Intelligently identifies Domain Stories, Strategic DDD, or Tactical DDD schemas
+- 📝 **Rich Documentation** - Generates comprehensive Markdown with Mermaid UML and sequence diagrams
+- 🎯 **Single Command** - One tool for all your DDD documentation needs
+- 🚀 **Easy Installation** - Install directly from GitHub with pip
+- 🔧 **Extensible** - Built on modular architecture for easy customization
 
-- **Dual Output Modes**: Generate either multiple files (one per story) or a single comprehensive file with navigation
-- **Structured Markdown Generation**: Creates organized documentation with table of contents, catalogs, and cross-references
-- **Embedded Mermaid Diagrams**: Generates sequence diagrams and flowcharts that render natively in GitHub/GitLab
-- **Multi-Story Support**: Handles large models with 30+ domain stories (tested with 33 stories)
-- **Smart Navigation**: Anchor links, "Back to Top" buttons, and cross-story references
-- **Entity Catalogs**: Auto-generates actor, aggregate, and command catalogs with usage tracking
-- **Tag-Based Organization**: Groups stories by tags for easy navigation
-- **No External Dependencies**: Uses only PyYAML - renders anywhere Markdown is supported
+## Supported Schemas
+
+### 1. Domain Stories
+Narrative scenarios with actors, work objects, and activities. Perfect for capturing domain knowledge through storytelling.
+
+**Example Output:**
+- Story narrative with participant interactions
+- Mermaid sequence diagrams
+- Scenario tables with activities and outcomes
+
+### 2. Strategic DDD
+System architecture with domains, bounded contexts, and context mappings. Ideal for documenting your strategic design decisions.
+
+**Example Output:**
+- System architecture diagrams
+- Domain and bounded context hierarchies
+- Context mapping relationships
+- BFF (Backend for Frontend) patterns
+
+### 3. Tactical DDD
+Detailed bounded context design with aggregates, entities, value objects, and services. Complete tactical patterns documentation.
+
+**Example Output:**
+- Aggregate UML class diagrams
+- Entity and value object specifications
+- Repository interfaces
+- Domain and application services
+- Command and query interfaces (CQRS)
+- Domain events
 
 ## Installation
 
 ### Prerequisites
+- Python 3.8 or higher
+- pip
 
-- Python 3.8+
-- Virtual environment (recommended)
-
-### Setup
+### Method 1: Direct Installation from GitHub
 
 ```bash
-# Clone or navigate to the project
+pip install git+https://github.com/igormusic/domain-stories-visual.git
+```
+
+### Method 2: Clone and Install
+
+```bash
+# Clone the repository
+git clone https://github.com/igormusic/domain-stories-visual.git
 cd domain-stories-visual
 
-# Create virtual environment
-python3 -m venv venv
+# Install in development mode (recommended for contributors)
+pip install -e .
 
-# Activate virtual environment
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Or install normally
+pip install .
+```
 
-# Install dependencies
-pip install -r requirements.txt
+### Method 3: Install Specific Version/Branch
+
+```bash
+# Install specific version tag
+pip install git+https://github.com/igormusic/domain-stories-visual.git@v1.0.0
+
+# Install from specific branch
+pip install git+https://github.com/igormusic/domain-stories-visual.git@main
+```
+
+### Verify Installation
+
+After installation, verify the command is available globally:
+
+```bash
+s2doc --version
+s2doc --help
 ```
 
 ## Usage
 
-### Basic Conversion (Multiple Files)
+### Basic Usage
 
-Generate separate markdown files for each story plus index and catalogs:
-
-```bash
-# Activate virtual environment
-source venv/bin/activate
-
-# Convert YAML to multiple Markdown files
-python convert_to_markdown.py <input.yaml> <output_dir>
-
-# Example
-python convert_to_markdown.py cb-domain-stories.yaml output/
-```
-
-**Output Structure** (37 files):
-
-```
-output/
-├── index.md                           # Main index with story catalog
-├── actors.md                          # Complete actor catalog
-├── aggregates.md                      # Complete aggregate catalog
-├── commands.md                        # Complete command catalog
-├── dst_client_profile_creation.md    # Individual story pages
-├── dst_user_registration.md
-├── dst_approval_workflow_submit.md
-└── ... (33 total story files)
-```
-
-### Single File Conversion (Recommended for Viewing)
-
-Generate a single comprehensive markdown file with complete navigation:
+The tool automatically detects your schema type:
 
 ```bash
-# Activate virtual environment
-source venv/bin/activate
-
-# Convert YAML to single Markdown file
-python convert_to_markdown.py <input.yaml> <output_dir> --single-file
-
-# Example
-python convert_to_markdown.py cb-domain-stories.yaml output/ --single-file
+# Auto-detect schema and generate documentation
+s2doc payment-workflow.yaml
 ```
 
-**Output**: `output/domain-stories-complete.md` (3000+ lines, 128KB)
+### Specify Output Directory
 
-**Features**:
-- Complete table of contents with anchor links
-- Stories organized by tags (click to jump to story)
-- All stories listing table with quick navigation
-- "Back to Top" links throughout
-- Entity catalogs with cross-story anchor links
-- All Mermaid diagrams embedded
-- Perfect for sharing or viewing in one place
-
-## Generated Documentation
-
-### 1. Index Page (index.md)
-
-The main entry point with:
-- Story count and version
-- Stories grouped by tags (Priority, Phase, MVP, etc.)
-- Complete story listing with links
-- Links to entity catalogs
-
-### 2. Individual Story Pages
-
-Each story includes:
-
-#### Metadata
-- Story ID, title, tags
-- Comprehensive description
-
-#### Actors Section
-| Actor ID | Name | Kind | Description |
-|----------|------|------|-------------|
-| `act_bank_admin` | Bank Administrator | person | Bank employee who... |
-
-#### Domain Model
-- **Aggregates**: With invariants and business rules
-- **Work Objects**: With full attribute tables (name, type, required, description)
-
-#### Commands, Queries, Events, Policies
-- Structured tables showing relationships
-- Cross-references using entity IDs
-
-#### Visualizations
-
-**Sequence Diagram** (Mermaid):
-```mermaid
-sequenceDiagram
-    participant bank_admin as Bank Administrator
-    participant System
-    bank_admin->>+System: CreateClientProfile
-    System-->>-bank_admin: ClientProfileCreated
+```bash
+# Generate documentation in a specific directory
+s2doc payments-strategic.yaml -o docs/
 ```
 
-**Command-Event-Policy Flow** (Mermaid):
-```mermaid
-graph LR
-    cmd_create[CreateClientProfile]
-    evt_created[ClientProfileCreated]
-    cmd_create -->|emits| evt_created
-    evt_created -->|triggers| pol_notify
+### Verbose Mode
+
+```bash
+# See detailed processing information
+s2doc payments-tactical.yaml -v
 ```
 
-### 3. Entity Catalogs
+### Command-Line Options
 
-#### Actor Catalog (actors.md)
-Lists all unique actors across all stories with:
-- Actor ID, name, kind
-- Links to stories where they appear
+```
+s2doc [-h] [-o OUTPUT] [-v] [--version] input
 
-#### Aggregate Catalog (aggregates.md)
-Lists all aggregates with:
-- Aggregate ID and name
-- Links to stories where they're used
+Positional Arguments:
+  input                 Input YAML file
 
-#### Command Catalog (commands.md)
-Lists all commands with:
-- Command ID and name
-- Links to stories where they appear
-
-## Input Format
-
-The tool expects YAML files following the `domain-stories-schema.yaml` specification.
-
-### Example Input Structure
-
-```yaml
-version: "2.0.0"
-
-domain_stories:
-  - domain_story_id: dst_example
-    title: "Example Domain Story"
-    description: "Story description..."
-    tags:
-      - user_management
-      - priority_1
-
-    actors:
-      - actor_id: act_user
-        name: "User"
-        kind: person
-        description: "End user..."
-
-    commands:
-      - command_id: cmd_submit_order
-        name: "SubmitOrder"
-        actor_ids:
-          - act_user
-        emits_events:
-          - evt_order_submitted
-
-    events:
-      - event_id: evt_order_submitted
-        name: "OrderSubmitted"
-        caused_by:
-          command_id: cmd_submit_order
+Options:
+  -h, --help            Show help message and exit
+  -o OUTPUT, --output OUTPUT
+                        Output directory (default: current directory)
+  -v, --verbose         Enable verbose output
+  --version             Show version number and exit
 ```
 
-See `cb-domain-stories.yaml` for a complete example with 33 stories.
+## Examples
 
-## Visualization Options
+### Example 1: Domain Stories
 
-### Supported Diagram Types
-
-1. **Sequence Diagrams**: Show actor interactions over time
-   - Actor → System → Events
-   - Limited to first 5 commands per story (prevents clutter)
-
-2. **Command-Event-Policy Flowcharts**: Show causal chains
-   - Commands emit Events
-   - Events trigger Policies
-   - Policies issue new Commands
-   - Limited to 15 nodes (prevents diagram explosion)
-
-### GitHub Rendering
-
-All Mermaid diagrams render natively in:
-- GitHub (markdown preview)
-- GitLab
-- VS Code (with Markdown Preview Mermaid extension)
-- Obsidian
-- Most modern markdown viewers
-
-## Advanced Features
-
-### Limiting Diagram Complexity
-
-For stories with many entities, the converter automatically:
-- Limits sequence diagrams to 5 commands
-- Limits flowcharts to 15 nodes
-- Shows first 2 events per command
-- Shows first 1 policy per event
-
-This prevents diagram overload while maintaining readability.
-
-### Cross-Story References
-
-The catalogs link entities across stories:
-- See which stories use the same actor
-- Find all uses of an aggregate
-- Track command usage patterns
-
-### Customization
-
-To modify diagram limits or styling, edit `convert_to_markdown.py`:
-
-```python
-# In generate_mermaid_sequence():
-for cmd in commands[:5]:  # Change limit here
-
-# In generate_mermaid_flow():
-max_nodes = 15  # Change maximum nodes
+```bash
+$ s2doc payment-flow.yaml
+Detected schema: Domain Stories (narrative scenarios)
+✓ Generated payment-flow.md
 ```
 
-## Research Documentation
+**Input:** `payment-flow.yaml` with domain story structure
+**Output:** `payment-flow.md` with narrative and sequence diagram
 
-For detailed analysis of visualization options, see:
-- **[ds-visual-prompt-research.md](ds-visual-prompt-research.md)**: Complete research on 10+ visualization approaches
+### Example 2: Strategic DDD
 
-This document explores:
-- Markdown options
-- Mermaid diagrams
-- PlantUML
-- Graphviz
-- Interactive HTML (D3.js, Cytoscape)
-- C4 Model diagrams
-- And more...
+```bash
+$ s2doc payments-strategic.yaml -o docs/
+Detected schema: Strategic DDD (system architecture)
+✓ Generated docs/payments-strategic.md
+```
 
-## Schema Reference
+**Input:** `payments-strategic.yaml` with system, domains, and bounded contexts
+**Output:** `docs/payments-strategic.md` with architecture documentation
 
-The tool validates against:
-- **[domain-stories-schema.yaml](domain-stories-schema.yaml)**: JSON Schema specification
-- **[domain-stories-context.md](domain-stories-context.md)**: Taxonomy and relationships
+### Example 3: Tactical DDD
 
-### Entity ID Conventions
+```bash
+$ s2doc payments-tactical.yaml -v
+Detected schema: Tactical DDD (bounded context details)
+Processing bounded context: bc_payment_scheduling
+✓ Generated bc_payment_scheduling.md
+```
 
-| Entity Type | Prefix | Example |
-|-------------|--------|---------|
-| Domain Story | `dst_` | `dst_checkout_process` |
-| Actor | `act_` | `act_customer` |
-| Command | `cmd_` | `cmd_submit_order` |
-| Query | `qry_` | `qry_get_status` |
-| Event | `evt_` | `evt_order_created` |
-| Policy | `pol_` | `pol_notify_user` |
-| Aggregate | `agg_` | `agg_order` |
-| Work Object | `wobj_` | `wobj_invoice` |
-| Activity | `actv_` | `actv_process_payment` |
+**Input:** `payments-tactical.yaml` with bounded context, aggregates, and entities
+**Output:** `bc_payment_scheduling.md` with tactical design documentation
 
-All IDs use `lower_snake_case` format.
+## Schema Detection
 
-## Example: Commercial Banking Platform
+S2Doc automatically detects your schema type using:
 
-The included example (`cb-domain-stories.yaml`) demonstrates:
-- **33 domain stories** covering user management, service enrollment, approval workflows
-- **700+ business entities** (actors, commands, events, aggregates)
-- **Multi-tier relationships** (Bank → Client → Payors)
-- **Integration patterns** (Okta, Express, Anti-Corruption Layer)
-- **Approval workflows** (single/dual approvers, thresholds, parallel approval)
+1. **`$schema` field** (most reliable) - Checks for schema URL containing "domain-stories", "strategic", or "tactical"
+2. **Top-level keys**:
+   - Domain Stories: `domain_story` or `stories`
+   - Strategic DDD: `system` with `domains` or `bounded_contexts`
+   - Tactical DDD: `bounded_context` with `aggregates` or `entities`
+3. **Nested structure analysis** - Validates expected nested elements
 
-### Generated Output Stats
+If the schema cannot be detected, you'll receive a helpful error message:
 
-- 36 markdown files (33 stories + 3 catalogs + index)
-- 12 unique actors
-- 28 unique aggregates
-- 80+ unique commands
-- Native GitHub rendering with interactive Mermaid diagrams
+```
+Error: Unable to detect schema type for 'input.yaml'
+
+The file does not match any of the supported schemas:
+  - Domain Stories (expects 'domain_story' or 'stories' key)
+  - Strategic DDD (expects 'system' key with domains/bounded_contexts)
+  - Tactical DDD (expects 'bounded_context' key with aggregates/entities)
+
+Please verify your YAML file structure.
+```
+
+## Output Files
+
+### Domain Stories
+- **One file** named after the input: `input-name.md`
+
+### Strategic DDD
+- **One file** named after the input: `input-name.md`
+
+### Tactical DDD
+- **One file per bounded context** named after the bounded context ID: `bc_<id>.md`
+- Example: `bc_payment_scheduling.md`
+
+## Documentation Features
+
+### Domain Stories Output Includes:
+- Story title and description
+- Actor and work object definitions
+- Activity sequences
+- Scenario narratives
+- Mermaid sequence diagrams
+
+### Strategic DDD Output Includes:
+- System architecture overview
+- Hierarchical index
+- Domain descriptions
+- Bounded context details (nested under domains)
+- Context mapping relationships
+- BFF patterns
+- Mermaid architecture diagrams with stereotypes
+
+### Tactical DDD Output Includes:
+- Bounded context header
+- Summary tables (Application Services, Domain Services, Aggregates, Repositories)
+- Aggregate details with UML class diagrams
+- Entity specifications with attributes and methods
+- Value object definitions
+- Repository interfaces
+- Domain and application service documentation
+- Domain events
+- Command and query interfaces (CQRS pattern)
+- Transaction boundaries and workflows
 
 ## Troubleshooting
 
-### Mermaid Diagrams Not Rendering
+### Command not found after installation
 
-**Problem**: Diagrams show as code blocks
+If `s2doc` is not found after installation:
 
-**Solution**: Ensure you're viewing on:
-- GitHub (built-in support)
-- GitLab (built-in support)
-- VS Code with "Markdown Preview Mermaid Support" extension
-- Obsidian (built-in support)
-
-### Large Diagram Errors
-
-**Problem**: Complex stories create unreadable diagrams
-
-**Solution**: The converter auto-limits nodes. To further reduce:
-1. Split large stories into smaller stories
-2. Adjust limits in `convert_to_markdown.py`
-
-### YAML Parsing Errors
-
-**Problem**: Conversion fails with YAML errors
-
-**Solution**: Validate your YAML:
 ```bash
-python -c "import yaml; yaml.safe_load(open('your-file.yaml'))"
+# Check if pip's script directory is in your PATH
+python3 -m pip show s2doc
+
+# Try running directly
+python3 -m s2doc.cli input.yaml
+
+# Or reinstall with user flag
+pip install --user git+https://github.com/igormusic/domain-stories-visual.git
 ```
 
-Check for:
-- Proper indentation
-- Matching ID patterns (`act_`, `cmd_`, etc.)
-- Required fields (see schema)
+### YAML parsing errors
+
+Ensure your YAML file is valid:
+
+```bash
+# Use a YAML validator
+python3 -c "import yaml; yaml.safe_load(open('your-file.yaml'))"
+```
+
+### Schema not detected
+
+Verify your YAML file has the required top-level keys:
+- Domain Stories: `domain_story` or `stories`
+- Strategic DDD: `system`
+- Tactical DDD: `bounded_context`
+
+## Uninstallation
+
+```bash
+pip uninstall s2doc
+```
 
 ## Contributing
 
-### Adding New Visualization Types
+Contributions are welcome! The project structure is:
 
-To add new diagram types:
-
-1. Create a new method in `DomainStoryConverter` class:
-```python
-def generate_mermaid_state_diagram(self, story: Dict[str, Any]) -> str:
-    """Generate Mermaid state diagram for aggregate lifecycle."""
-    # Implementation here
 ```
-
-2. Add to `generate_story_markdown()`:
-```python
-md.append("### State Diagram\n")
-md.append(self.generate_mermaid_state_diagram(story))
+s2doc/
+├── __init__.py              # Package initialization
+├── __version__.py           # Version information
+├── cli.py                   # Main CLI entry point
+├── detector.py              # Schema detection logic
+├── converters/
+│   ├── domain_stories/      # Domain stories converter
+│   ├── strategic/           # Strategic DDD converter
+│   └── tactical/            # Tactical DDD converter
+└── utils/                   # Common utilities
 ```
-
-### Extending Catalogs
-
-To add new catalog types (e.g., Events Catalog):
-
-1. Add method:
-```python
-def generate_event_catalog(self):
-    """Generate catalog of all events."""
-    # Similar to generate_actor_catalog()
-```
-
-2. Call in `convert_all()`:
-```python
-self.generate_event_catalog()
-```
-
-## Performance
-
-- **Conversion Time**: ~1-2 seconds for 33 stories (40K+ YAML tokens)
-- **Output Size**: ~200KB total markdown
-- **Memory**: Minimal (<50MB for large models)
 
 ## License
 
-This tool is provided as-is for Domain Storytelling and DDD modeling purposes.
+MIT License - See LICENSE file for details
 
-## Resources
+## Author
 
-- **Domain Storytelling**: https://domainstorytelling.org/
-- **Mermaid Documentation**: https://mermaid.js.org/
-- **DDD Patterns**: https://www.domainlanguage.com/ddd/
-- **JSON Schema**: https://json-schema.org/
+Igor Music
 
----
+## Links
 
-## Quick Start Examples
+- **Repository**: https://github.com/igormusic/domain-stories-visual
+- **Issues**: https://github.com/igormusic/domain-stories-visual/issues
 
-### Multi-File Output
+## Version History
 
-```bash
-# Setup
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Convert to multiple files
-python convert_to_markdown.py cb-domain-stories.yaml output/
-
-# View
-open output/index.md  # Or view in VS Code, GitHub, etc.
-```
-
-**Result**: 37 markdown files with embedded Mermaid diagrams, ready to commit to your repository!
-
-### Single-File Output (Recommended)
-
-```bash
-# Setup (if not done already)
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Convert to single file
-python convert_to_markdown.py cb-domain-stories.yaml output/ --single-file
-
-# View
-open output/domain-stories-complete.md  # Or view in VS Code, GitHub, etc.
-```
-
-**Result**: One comprehensive markdown file (3000+ lines) with full navigation and embedded Mermaid diagrams!
-
----
-
-**Questions?** Check [ds-visual-prompt-research.md](ds-visual-prompt-research.md) for detailed visualization research and alternative approaches.
+### 1.0.0 (Current)
+- Initial unified release
+- Automatic schema detection
+- Support for Domain Stories, Strategic DDD, and Tactical DDD
+- Humanized entity names in output
+- Comprehensive Mermaid diagram generation

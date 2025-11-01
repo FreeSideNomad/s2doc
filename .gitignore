@@ -24,6 +24,7 @@ wheels/
 
 # Output
 output/
+test-output/
 
 # IDE
 .vscode/

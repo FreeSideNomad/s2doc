@@ -1,0 +1,523 @@
+system:
+  id: sys_commercial_banking
+  name: "Commercial Banking System"
+  description: "Enterprise commercial banking platform for Canadian financial institutions"
+  version: "2.0.0"
+
+  domains:
+    - id: dom_payment_scheduling
+      name: "Payment Scheduling"
+      type: core
+      description: "Core domain for scheduling future-dated and recurring payments across multiple payment types"
+      strategic_importance: critical
+      bounded_contexts:
+        - bc_payment_scheduling
+        - bc_payment_execution
+        - bc_payment_reporting
+      investment_strategy: "Best team, significant investment in rich domain model - this is competitive advantage"
+      notes: "This is where we differentiate from competitors. Robust scheduling with approval workflows, working day calendars, and multi-payment-type support."
+
+    - id: dom_approval_workflow
+      name: "Approval Workflow"
+      type: supporting
+      description: "Supporting domain for managing approval policies and workflows"
+      strategic_importance: important
+      bounded_contexts:
+        - bc_approval_workflow
+      investment_strategy: "Adequate team, moderate investment - good enough implementation"
+      notes: "Important for compliance and control, but not differentiating. Focus on correctness over innovation."
+
+    - id: dom_calendar_management
+      name: "Calendar Management"
+      type: supporting
+      description: "Supporting domain for managing working day calendars across jurisdictions"
+      strategic_importance: important
+      bounded_contexts:
+        - bc_calendar_management
+      investment_strategy: "Adequate team, moderate investment - consider buying commercial calendar solution"
+      notes: "Critical for correctness but not differentiating. Multi-jurisdiction calendar rules are complex but well-understood."
+
+    - id: dom_notification
+      name: "Notification Services"
+      type: generic
+      description: "Generic domain for sending notifications to users and systems"
+      strategic_importance: standard
+      bounded_contexts:
+        - bc_notification
+      investment_strategy: "Minimal investment - buy off-the-shelf solution or use platform services"
+      notes: "Pure commodity. Use SendGrid, Twilio, or similar SaaS providers."
+
+  bounded_contexts:
+    - id: bc_payment_scheduling
+      name: "Payment Scheduling Context"
+      domain_ref: dom_payment_scheduling
+      description: "Core context managing payment templates, schedules, and recurring payment setup. Contains rich domain model for template lifecycle and scheduling rules."
+      ubiquitous_language:
+        glossary:
+          - term: "Payment Template"
+            definition: "Reusable payment configuration containing all details needed to execute a payment"
+            examples:
+              - "Monthly rent payment template"
+              - "Bi-weekly payroll template"
+          - term: "Scheduled Payment"
+            definition: "A specific payment instance scheduled for future execution based on a template"
+          - term: "Recurrence Pattern"
+            definition: "Rules defining frequency of recurring payments (daily, weekly, monthly, etc.)"
+          - term: "Value Date"
+            definition: "The date when funds should be transferred"
+          - term: "Execution Date"
+            definition: "The actual date when payment processing occurs (nearest working day to value date)"
+          - term: "Payment Group"
+            definition: "Collection of payment templates that can be executed together as a batch"
+          - term: "Approval Status"
+            definition: "Current state of template in approval workflow (DRAFT, PENDING, APPROVED, REJECTED)"
+      team_ownership: "Payment Scheduling Team (6 engineers, 1 architect)"
+      aggregates:
+        - agg_payment_template
+        - agg_scheduled_payment
+        - agg_payment_group
+        - agg_schedule
+      repositories:
+        - repo_payment_template
+        - repo_scheduled_payment
+        - repo_payment_group
+        - repo_schedule
+      domain_services:
+        - svc_dom_payment_validation
+        - svc_dom_approval_policy
+        - svc_dom_working_day_calculation
+        - svc_dom_recurrence_calculation
+      application_services:
+        - svc_app_payment_template
+        - svc_app_scheduled_payment
+
+    - id: bc_payment_execution
+      name: "Payment Execution Context"
+      domain_ref: dom_payment_scheduling
+      description: "Context responsible for executing scheduled payments, managing execution lifecycle, and handling failures and retries"
+      ubiquitous_language:
+        glossary:
+          - term: "Payment Execution"
+            definition: "The process of actually submitting a payment to the payment processor"
+          - term: "Execution Status"
+            definition: "Current state of execution (PENDING, SUCCESS, FAILED)"
+          - term: "ACH Return"
+            definition: "Payment returned by receiving bank due to insufficient funds or other reasons"
+          - term: "FX Contract"
+            definition: "Foreign exchange contract booked for wire payments at execution time"
+          - term: "Retry Policy"
+            definition: "Rules governing when and how many times to retry failed payments"
+      team_ownership: "Payment Execution Team (4 engineers)"
+      aggregates:
+        - agg_payment_execution
+        - agg_ach_return
+      repositories:
+        - repo_payment_execution
+      application_services:
+        - svc_app_payment_execution
+      domain_events:
+        - evt_payment_executed
+        - evt_payment_failed
+        - evt_ach_return_received
+        - evt_fx_contract_booked
+
+    - id: bc_approval_workflow
+      name: "Approval Workflow Context"
+      domain_ref: dom_approval_workflow
+      description: "Context managing approval policies, workflow state, and approver assignment based on company-specific rules"
+      ubiquitous_language:
+        glossary:
+          - term: "Approval Policy"
+            definition: "Rules determining when approval is required (e.g., high-value payments, specific payment types)"
+          - term: "Approver"
+            definition: "User with authority to approve or reject templates"
+          - term: "Approval Chain"
+            definition: "Sequence of approvers for multi-level approval workflows"
+          - term: "Delegation"
+            definition: "Temporary transfer of approval authority to another user"
+      team_ownership: "Workflow Team (3 engineers)"
+      application_services:
+        - svc_app_approval_workflow
+      domain_events:
+        - evt_template_submitted_for_approval
+        - evt_template_approved
+        - evt_template_rejected
+
+    - id: bc_payment_reporting
+      name: "Payment Reporting Context"
+      domain_ref: dom_payment_scheduling
+      description: "Read-optimized context providing payment status views, activity reports, and analytics. Uses CQRS read models."
+      ubiquitous_language:
+        glossary:
+          - term: "Payment Status View"
+            definition: "Current state and history of a payment"
+          - term: "Activity Report"
+            definition: "Summary of payment activity over a date range"
+          - term: "Batch Status"
+            definition: "Aggregate status of all payments in a payment group"
+      team_ownership: "Reporting Team (2 engineers)"
+      application_services:
+        - svc_app_payment_reporting
+      domain_events:
+        - evt_payment_scheduled
+        - evt_payment_executed
+        - evt_payment_cancelled
+
+    - id: bc_calendar_management
+      name: "Calendar Management Context"
+      domain_ref: dom_calendar_management
+      description: "Context managing working day calendars, holiday schedules, and jurisdiction-specific rules for Canada and international destinations"
+      ubiquitous_language:
+        glossary:
+          - term: "Working Day"
+            definition: "Day when payments can be processed (excludes weekends and holidays)"
+          - term: "Jurisdiction"
+            definition: "Geographic region with specific calendar rules (Canada, US, UK, etc.)"
+          - term: "Holiday Calendar"
+            definition: "List of non-working days for a jurisdiction"
+          - term: "Settlement Day"
+            definition: "Next available working day for payment settlement"
+      team_ownership: "Calendar Team (2 engineers)"
+      application_services:
+        - svc_app_calendar_management
+
+    - id: bc_notification
+      name: "Notification Context"
+      domain_ref: dom_notification
+      description: "Generic context for sending notifications via email, SMS, push notifications, and webhooks"
+      team_ownership: "Platform Team (shared service)"
+      application_services:
+        - svc_app_notification
+
+  context_mappings:
+    - id: cm_payment_scheduling_to_payment_execution
+      name: "Payment Scheduling to Execution Integration"
+      upstream_context: bc_payment_scheduling
+      downstream_context: bc_payment_execution
+      relationship_type: customer_supplier
+      integration_pattern: "Event-driven architecture via domain events. Scheduling context publishes PaymentScheduled event, execution context subscribes."
+      translation_map:
+        "ScheduledPayment (Scheduling)": "PaymentExecution (Execution)"
+        "Template": "ExecutionParameters"
+      notes: "Clear separation: scheduling owns 'when' and 'what', execution owns 'how'. Event-based for loose coupling."
+
+    - id: cm_payment_scheduling_to_approval_workflow
+      name: "Payment Scheduling to Approval Integration"
+      upstream_context: bc_payment_scheduling
+      downstream_context: bc_approval_workflow
+      relationship_type: customer_supplier
+      integration_pattern: "REST API calls for synchronous approval checks + events for workflow state changes"
+      translation_map:
+        "PaymentTemplate": "ApprovalRequest"
+        "TemplateId": "RequestId"
+      notes: "Scheduling requests approval decisions, approval workflow provides them. Bidirectional event flow for status updates."
+
+    - id: cm_payment_scheduling_to_calendar_management
+      name: "Payment Scheduling to Calendar Integration"
+      upstream_context: bc_payment_scheduling
+      downstream_context: bc_calendar_management
+      relationship_type: customer_supplier
+      acl_details:
+        facades:
+          - "WorkingDayFacade"
+        adapters:
+          - "CalendarApiAdapter"
+        translators:
+          - "JurisdictionTranslator"
+      integration_pattern: "REST API with Anti-Corruption Layer to isolate from calendar system complexity"
+      notes: "ACL protects scheduling domain from calendar system changes. Facade provides clean working day calculation interface."
+
+    - id: cm_payment_execution_to_fx_system
+      name: "Payment Execution to FX System Integration"
+      upstream_context: bc_payment_execution
+      downstream_context: external_fx_system
+      relationship_type: anti_corruption_layer
+      integration_pattern: "REST API with comprehensive ACL including facades, adapters, and translators"
+      acl_details:
+        facades:
+          - "FXContractFacade"
+        adapters:
+          - "FXSystemApiAdapter"
+          - "FXResponseTranslator"
+        translators:
+          - "CurrencyCodeTranslator"
+          - "ExchangeRateTranslator"
+      translation_map:
+        "Payment": "FXTradeRequest"
+        "PaymentAmount": "TradePrincipal"
+      notes: "External FX system (out of scope). ACL essential to protect domain from external vendor changes."
+
+    - id: cm_payment_execution_to_payment_processor
+      name: "Payment Execution to Payment Processor Integration"
+      upstream_context: bc_payment_execution
+      downstream_context: external_payment_processor
+      relationship_type: anti_corruption_layer
+      integration_pattern: "REST API with ACL. Separate adapters for each payment type (ACH, Wire, Interac, etc.)"
+      acl_details:
+        facades:
+          - "PaymentProcessorFacade"
+        adapters:
+          - "ACHAdapter"
+          - "WireAdapter"
+          - "InteracAdapter"
+          - "BillPaymentAdapter"
+        translators:
+          - "PaymentTypeTranslator"
+          - "AccountNumberTranslator"
+      notes: "External payment processor (out of scope). ACL provides uniform interface despite different payment type APIs."
+
+    - id: cm_payment_scheduling_to_notification
+      name: "Payment Scheduling to Notification Integration"
+      upstream_context: bc_payment_scheduling
+      downstream_context: bc_notification
+      relationship_type: open_host_service
+      integration_pattern: "Event bus. Notification context provides published interface, multiple contexts publish events."
+      notes: "Notification is open host service. Scheduling publishes events, notification subscribes and handles delivery."
+
+    - id: cm_payment_execution_to_notification
+      name: "Payment Execution to Notification Integration"
+      upstream_context: bc_payment_execution
+      downstream_context: bc_notification
+      relationship_type: open_host_service
+      integration_pattern: "Event bus. Execution publishes execution events, notification delivers user notifications."
+      notes: "Same open host pattern. Execution context doesn't know about notification details."
+
+    - id: cm_approval_workflow_to_notification
+      name: "Approval Workflow to Notification Integration"
+      upstream_context: bc_approval_workflow
+      downstream_context: bc_notification
+      relationship_type: open_host_service
+      integration_pattern: "Event bus. Approval workflow publishes approval decisions, notification alerts stakeholders."
+      notes: "Approval workflow remains decoupled from notification mechanism."
+
+    - id: cm_payment_reporting_to_payment_scheduling
+      name: "Payment Reporting to Scheduling Integration"
+      upstream_context: bc_payment_reporting
+      downstream_context: bc_payment_scheduling
+      relationship_type: conformist
+      integration_pattern: "CQRS event sourcing. Reporting builds read models by consuming events from scheduling."
+      notes: "Reporting conforms to scheduling's event structure. No translation, direct projection."
+
+    - id: cm_payment_reporting_to_payment_execution
+      name: "Payment Reporting to Execution Integration"
+      upstream_context: bc_payment_reporting
+      downstream_context: bc_payment_execution
+      relationship_type: conformist
+      integration_pattern: "CQRS event sourcing. Reporting consumes execution events to build status views."
+      notes: "Reporting conforms to execution's events. Read-only, eventual consistency acceptable."
+
+  bff_scopes:
+    - id: bff_web
+      name: "WebBFF"
+      client_type: web
+      serves_interface: "Web browser-based commercial banking interface for desktop users"
+      aggregates_from_contexts:
+        - bc_payment_scheduling
+        - bc_payment_execution
+        - bc_payment_reporting
+      owned_by_team: "Web Frontend Team"
+      team_type: frontend
+      provides:
+        endpoints:
+          - path: "/api/web/payments/templates"
+            method: POST
+            aggregates_from:
+              - bc_payment_scheduling
+            description: "Create payment template aggregating validation from multiple contexts"
+          - path: "/api/web/payments/templates/{id}"
+            method: GET
+            aggregates_from:
+              - bc_payment_scheduling
+              - bc_payment_reporting
+            description: "Get template with status and history from reporting"
+          - path: "/api/web/payments/schedule"
+            method: POST
+            aggregates_from:
+              - bc_payment_scheduling
+              - bc_calendar_management
+            description: "Schedule payment with working day validation"
+          - path: "/api/web/payments/dashboard"
+            method: GET
+            aggregates_from:
+              - bc_payment_scheduling
+              - bc_payment_execution
+              - bc_payment_reporting
+            description: "Dashboard aggregating data from all payment contexts"
+        data_aggregation:
+          strategy: parallel
+          example: "Dashboard endpoint calls scheduling, execution, and reporting contexts in parallel, combines results"
+        transformations:
+          - from_context: bc_payment_scheduling
+            transformation_type: field_mapping
+            description: "Map domain PaymentTemplate to web-friendly TemplateDTO"
+          - from_context: bc_payment_reporting
+            transformation_type: denormalization
+            description: "Flatten nested payment history into single-level array for web tables"
+        client_optimizations:
+          - "Pagination for large payment lists"
+          - "Field selection to minimize payload size"
+          - "Caching of reference data (payment types, jurisdictions)"
+      responsibilities:
+        data_aggregation: true
+        client_specific_orchestration: true
+        presentation_logic: true
+        format_translation: true
+        business_logic: false
+        transaction_management: false
+        direct_persistence: false
+      architecture_layer: "integration"
+      upstream_dependencies:
+        - api_gateway
+      calls:
+        - application_service
+        - bounded_context_api
+      pattern_type: "bff"
+      anti_patterns:
+        shared_business_logic: false
+        generic_cross_cutting_concerns: false
+        direct_database_access: false
+        serving_multiple_client_types: false
+
+    - id: bff_mobile
+      name: "MobileBFF"
+      client_type: mobile_ios
+      serves_interface: "iOS/Android mobile banking application for on-the-go payment management"
+      aggregates_from_contexts:
+        - bc_payment_scheduling
+        - bc_payment_execution
+        - bc_payment_reporting
+      owned_by_team: "Mobile Frontend Team"
+      team_type: mobile
+      provides:
+        endpoints:
+          - path: "/api/mobile/payments/quick-schedule"
+            method: POST
+            aggregates_from:
+              - bc_payment_scheduling
+              - bc_calendar_management
+            description: "Simplified scheduling optimized for mobile UX"
+          - path: "/api/mobile/payments/recent"
+            method: GET
+            aggregates_from:
+              - bc_payment_execution
+              - bc_payment_reporting
+            description: "Recent payments with minimal data for mobile bandwidth"
+        data_aggregation:
+          strategy: sequential
+          example: "Mobile endpoints fetch minimal data first, additional details on demand"
+        transformations:
+          - from_context: bc_payment_reporting
+            transformation_type: filtering
+            description: "Return only essential fields for mobile bandwidth constraints"
+        client_optimizations:
+          - "Bandwidth optimization for mobile networks"
+          - "Image size reduction"
+          - "Aggressive caching strategy"
+          - "Pagination with small page sizes"
+      responsibilities:
+        data_aggregation: true
+        client_specific_orchestration: true
+        presentation_logic: true
+        format_translation: true
+        business_logic: false
+        transaction_management: false
+        direct_persistence: false
+      architecture_layer: "integration"
+      upstream_dependencies:
+        - api_gateway
+      calls:
+        - application_service
+        - bounded_context_api
+      pattern_type: "bff"
+      anti_patterns:
+        shared_business_logic: false
+        generic_cross_cutting_concerns: false
+        direct_database_access: false
+        serving_multiple_client_types: false
+
+  bff_interfaces:
+    - id: bff_if_payment_scheduling_web
+      name: "Payment Scheduling Web BFF Interface"
+      bff_scope_ref: bff_web
+      primary_bounded_context_ref: bc_payment_scheduling
+      additional_context_refs:
+        - bc_calendar_management
+        - bc_approval_workflow
+      base_path: "/api/web/payments"
+      endpoints:
+        - path: "/templates"
+          method: POST
+          operation_type: command
+          description: "Create payment template"
+          delegates_to_commands:
+            - cmd_create_payment_template
+          aggregates_data_from:
+            - bc_payment_scheduling
+        - path: "/templates/{id}/submit"
+          method: POST
+          operation_type: command
+          description: "Submit template for approval"
+          delegates_to_commands:
+            - cmd_submit_template_for_approval
+        - path: "/templates"
+          method: GET
+          operation_type: query
+          description: "List user templates"
+          delegates_to_queries:
+            - qry_list_templates
+          aggregates_data_from:
+            - bc_payment_scheduling
+            - bc_approval_workflow
+        - path: "/schedule"
+          method: POST
+          operation_type: command
+          description: "Schedule future or recurring payment"
+          delegates_to_commands:
+            - cmd_schedule_future_payment
+            - cmd_schedule_recurring_payment
+          aggregates_data_from:
+            - bc_payment_scheduling
+            - bc_calendar_management
+      execution_model: blocking
+      error_handling:
+        strategy: fail_fast
+        description: "Return errors immediately to web client for user correction"
+      technology_stack:
+        framework: "Micronaut"
+        controller_annotation: "@Controller"
+      layer: "infrastructure"
+
+    - id: bff_if_payment_reporting_web
+      name: "Payment Reporting Web BFF Interface"
+      bff_scope_ref: bff_web
+      primary_bounded_context_ref: bc_payment_reporting
+      additional_context_refs:
+        - bc_payment_scheduling
+        - bc_payment_execution
+      base_path: "/api/web/reports"
+      endpoints:
+        - path: "/payments/status/{id}"
+          method: GET
+          operation_type: query
+          description: "Get detailed payment status"
+          delegates_to_queries:
+            - qry_get_payment_status
+          aggregates_data_from:
+            - bc_payment_reporting
+            - bc_payment_execution
+        - path: "/activity"
+          method: GET
+          operation_type: query
+          description: "Generate activity report"
+          delegates_to_queries:
+            - qry_get_activity_report
+          aggregates_data_from:
+            - bc_payment_reporting
+      execution_model: async
+      error_handling:
+        strategy: partial_response
+        description: "Return partial data if some contexts unavailable"
+      technology_stack:
+        framework: "Micronaut"
+        controller_annotation: "@Controller"
+      layer: "infrastructure"
