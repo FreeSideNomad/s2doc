@@ -10,6 +10,7 @@ from .detector import detect_schema_type, get_schema_description, get_error_mess
 from .converters.domain_stories import DomainStoryConverter
 from .converters.strategic import StrategicDDDConverter
 from .converters.tactical import TacticalDDDConverter
+from .converters.data_eng import DataEngConverter
 from .__version__ import __version__
 
 
@@ -29,8 +30,9 @@ Supported schemas:
   - Domain Stories (narrative scenarios with actors and activities)
   - Strategic DDD (domains, bounded contexts, context mappings)
   - Tactical DDD (aggregates, entities, value objects, services)
+  - Data Engineering (pipelines, datasets, lineage, governance)
 
-For more information: https://github.com/anthropics/s2doc
+For more information: https://github.com/FreeSideNomad/s2doc
         """
     )
 
@@ -65,10 +67,14 @@ For more information: https://github.com/anthropics/s2doc
         print(f"Error: Could not create output directory '{args.output}': {e}", file=sys.stderr)
         sys.exit(4)
 
-    # Load YAML
+    # Load YAML (handle multi-document YAML with frontmatter)
     try:
         with open(args.input, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f)
+            docs = list(yaml.safe_load_all(f))
+            # If multiple documents, use the last one (frontmatter comes first)
+            data = docs[-1] if docs else None
+            if data is None:
+                raise ValueError("Empty YAML file")
     except yaml.YAMLError as e:
         print(f"Error: Failed to parse YAML file '{args.input}'", file=sys.stderr)
         print(f"  {e}", file=sys.stderr)
@@ -96,6 +102,8 @@ For more information: https://github.com/anthropics/s2doc
             convert_strategic_ddd(data, args.input, args.output, args.verbose)
         elif schema_type == SchemaType.TACTICAL_DDD:
             convert_tactical_ddd(data, args.input, args.output, args.verbose)
+        elif schema_type == SchemaType.DATA_ENGINEERING:
+            convert_data_engineering(data, args.input, args.output, args.verbose)
     except Exception as e:
         print(f"Error: Conversion failed: {e}", file=sys.stderr)
         if args.verbose:
@@ -148,6 +156,23 @@ def convert_tactical_ddd(data: dict, input_file: str, output_dir: str, verbose: 
 
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(markdown)
+
+    print(f"✓ Generated {output_file}")
+
+
+def convert_data_engineering(data: dict, input_file: str, output_dir: str, verbose: bool):
+    """Convert data engineering YAML to markdown"""
+    converter = DataEngConverter(data)
+
+    # Generate output filename from input filename
+    input_path = Path(input_file)
+    output_file = os.path.join(output_dir, f"{input_path.stem}.md")
+
+    if verbose:
+        system_name = data.get('system', {}).get('name', 'Unknown System')
+        print(f"Processing system: {system_name}")
+
+    converter.convert_to_markdown(output_file)
 
     print(f"✓ Generated {output_file}")
 

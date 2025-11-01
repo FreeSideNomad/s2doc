@@ -2,13 +2,13 @@
 
 **Convert YAML domain models to beautiful Markdown documentation**
 
-S2Doc is a unified command-line tool that automatically detects and converts three types of Domain-Driven Design YAML schemas into comprehensive Markdown documentation with Mermaid diagrams.
+S2Doc is a unified command-line tool that automatically detects and converts four types of YAML schemas into comprehensive Markdown documentation with Mermaid diagrams: Domain Stories, Strategic DDD, Tactical DDD, and Data Engineering.
 
 ## Features
 
-- 🔍 **Automatic Schema Detection** - Intelligently identifies Domain Stories, Strategic DDD, or Tactical DDD schemas
-- 📝 **Rich Documentation** - Generates comprehensive Markdown with Mermaid UML and sequence diagrams
-- 🎯 **Single Command** - One tool for all your DDD documentation needs
+- 🔍 **Automatic Schema Detection** - Intelligently identifies Domain Stories, Strategic DDD, Tactical DDD, or Data Engineering schemas
+- 📝 **Rich Documentation** - Generates comprehensive Markdown with Mermaid UML, sequence, and architecture diagrams
+- 🎯 **Single Command** - One tool for all your documentation needs
 - 🚀 **Easy Installation** - Install directly from GitHub with pip
 - 🔧 **Extensible** - Built on modular architecture for easy customization
 
@@ -41,6 +41,19 @@ Detailed bounded context design with aggregates, entities, value objects, and se
 - Domain and application services
 - Command and query interfaces (CQRS)
 - Domain events
+
+### 4. Data Engineering
+Comprehensive data pipeline and dataset modeling with lineage tracking, governance policies, and observability metrics. Perfect for documenting data platforms and ML systems.
+
+**Example Output:**
+- System architecture with domains, pipelines, and datasets
+- Pipeline flow diagrams showing stages and data flows
+- Dataset schemas with PII tracking
+- Data lineage diagrams showing upstream/downstream relationships
+- Data contracts with SLAs
+- Quality checks and validation rules
+- Governance policies (retention, access control, PII handling)
+- Observability metrics, SLOs, and alerts
 
 ## Installation
 
@@ -164,13 +177,31 @@ Processing bounded context: bc_payment_scheduling
 **Input:** `payments-tactical.yaml` with bounded context, aggregates, and entities
 **Output:** `bc_payment_scheduling.md` with tactical design documentation
 
+### Example 4: Data Engineering
+
+```bash
+$ s2doc ml-feature-store.yaml -v
+Detected schema: Data Engineering (pipeline and dataset modeling)
+Processing system: ML Feature Store Platform
+✓ Generated ml-feature-store.md
+```
+
+**Input:** `ml-feature-store.yaml` with system, domains, pipelines, and datasets
+**Output:** `ml-feature-store.md` with comprehensive data platform documentation including:
+- System architecture diagrams
+- Domain and pipeline hierarchies
+- Dataset catalogs with schemas and PII tracking
+- Data lineage visualization
+- Governance policies and observability metrics
+
 ## Schema Detection
 
 S2Doc automatically detects your schema type using:
 
-1. **`$schema` field** (most reliable) - Checks for schema URL containing "domain-stories", "strategic", or "tactical"
+1. **`$schema` field** (most reliable) - Checks for schema URL containing "domain-stories", "strategic", "tactical", or "data-eng"
 2. **Top-level keys**:
    - Domain Stories: `domain_story` or `stories`
+   - Data Engineering: `system`, `pipelines`, and `datasets` together
    - Strategic DDD: `system` with `domains` or `bounded_contexts`
    - Tactical DDD: `bounded_context` with `aggregates` or `entities`
 3. **Nested structure analysis** - Validates expected nested elements
@@ -184,6 +215,7 @@ The file does not match any of the supported schemas:
   - Domain Stories (expects 'domain_story' or 'stories' key)
   - Strategic DDD (expects 'system' key with domains/bounded_contexts)
   - Tactical DDD (expects 'bounded_context' key with aggregates/entities)
+  - Data Engineering (expects 'system', 'pipelines', and 'datasets' keys)
 
 Please verify your YAML file structure.
 ```
@@ -199,6 +231,10 @@ Please verify your YAML file structure.
 ### Tactical DDD
 - **One file per bounded context** named after the bounded context ID: `bc_<id>.md`
 - Example: `bc_payment_scheduling.md`
+
+### Data Engineering
+- **One file** named after the input: `input-name.md`
+- Example: `ml-feature-store.md`
 
 ## Documentation Features
 
@@ -229,6 +265,21 @@ Please verify your YAML file structure.
 - Domain events
 - Command and query interfaces (CQRS pattern)
 - Transaction boundaries and workflows
+
+### Data Engineering Output Includes:
+- System overview with metadata (owners, tags)
+- Hierarchical index (domains → pipelines → stages → datasets)
+- System architecture Mermaid diagram
+- Domain details with pipeline summaries
+- Pipeline specifications (mode, schedule, traits)
+- Pipeline flow diagrams showing stages and data flows
+- Stage details with transforms and dependencies
+- Dataset catalog with schemas, partitioning, and PII tracking
+- Data contracts with SLAs and consumers
+- Data quality checks with thresholds and alerts
+- Data lineage diagrams (upstream/downstream relationships)
+- Governance policies (retention, access control, PII handling)
+- Observability (metrics, SLOs, alerts)
 
 ## Troubleshooting
 

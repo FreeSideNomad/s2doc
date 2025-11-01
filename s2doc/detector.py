@@ -9,6 +9,7 @@ class SchemaType(Enum):
     DOMAIN_STORIES = "domain_stories"
     STRATEGIC_DDD = "strategic_ddd"
     TACTICAL_DDD = "tactical_ddd"
+    DATA_ENGINEERING = "data_engineering"
     UNKNOWN = "unknown"
 
 
@@ -34,10 +35,18 @@ def detect_schema_type(data: Dict[Any, Any]) -> SchemaType:
             return SchemaType.STRATEGIC_DDD
         elif 'tactical' in schema_url:
             return SchemaType.TACTICAL_DDD
+        elif 'data-eng' in schema_url or 'data-engineering' in schema_url:
+            return SchemaType.DATA_ENGINEERING
 
     # Check top-level keys for domain stories
     if 'domain_story' in data or 'domain_stories' in data or 'stories' in data:
         return SchemaType.DOMAIN_STORIES
+
+    # Check for data engineering schema (system with pipelines and datasets)
+    if 'system' in data and 'pipelines' in data and 'datasets' in data:
+        system = data['system']
+        if isinstance(system, dict) and 'domains' in system:
+            return SchemaType.DATA_ENGINEERING
 
     # Check for strategic DDD schema
     if 'system' in data:
@@ -70,6 +79,7 @@ def get_schema_description(schema_type: SchemaType) -> str:
         SchemaType.DOMAIN_STORIES: "Domain Stories (narrative scenarios)",
         SchemaType.STRATEGIC_DDD: "Strategic DDD (system architecture)",
         SchemaType.TACTICAL_DDD: "Tactical DDD (bounded context details)",
+        SchemaType.DATA_ENGINEERING: "Data Engineering (pipeline and dataset modeling)",
         SchemaType.UNKNOWN: "Unknown schema type"
     }
     return descriptions.get(schema_type, "Unknown")
@@ -87,6 +97,7 @@ The file does not match any of the supported schemas:
   - Domain Stories (expects 'domain_story' or 'stories' key)
   - Strategic DDD (expects 'system' key with domains/bounded_contexts)
   - Tactical DDD (expects 'bounded_context' key with aggregates/entities)
+  - Data Engineering (expects 'system', 'pipelines', and 'datasets' keys)
 
 Please verify your YAML file structure or check the documentation.
 """
